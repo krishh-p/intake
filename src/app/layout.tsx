@@ -32,8 +32,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body
+        suppressHydrationWarning
         className={`${libreBaskerville.variable} ${figtree.variable} ${ibmPlexMono.variable} font-sans antialiased`}
       >
         <AuthProvider>{children}</AuthProvider>

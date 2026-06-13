@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { VoiceImportForm } from "@/components/import/VoiceImportForm";
+import { IntakeConversation } from "@/components/import/IntakeConversation";
 import { PageHeader } from "@/components/layout/PageHeader";
 
 export default function ImportVoicePage() {
@@ -11,11 +11,11 @@ export default function ImportVoicePage() {
         Back to import
       </Link>
       <PageHeader
-        title="Voice note"
-        description="Describe what is happening with your health. Intake extracts structured clinical events from your note."
+        title="Talk to Intake"
+        description="Start a live voice session with Intake. End the session when you're done — it saves automatically to your timeline and knowledge graph."
       />
       <div className="max-w-2xl">
-        <VoiceImportForm />
+        <IntakeConversation />
       </div>
     </>
   );

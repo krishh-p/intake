@@ -11,8 +11,8 @@ const OPTIONS = [
   },
   {
     href: "/import/voice",
-    title: "Voice note",
-    description: "Record or write symptoms, medications, and care barriers in your own words.",
+    title: "Talk to Intake",
+    description: "Live voice session with Intake about symptoms, medications, and care barriers.",
   },
   {
     href: "/import/clinician",

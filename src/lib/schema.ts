@@ -43,7 +43,8 @@ export type GraphNodeKind =
   | "risk"
   | "source"
   | "task"
-  | "barrier";
+  | "barrier"
+  | "conversation";
 
 export type GraphNode = {
   id: string;
@@ -113,10 +114,30 @@ export type PatientProfile = {
   dob: string;
 };
 
+/** Structured summary of an Intake conversation — becomes a graph hub node. */
+export type ConversationContext = {
+  id: string;
+  patientId: string;
+  sourceId: string;
+  capturedAt: string;
+  title: string;
+  summary: string;
+  chiefConcern: string;
+  topics: string[];
+  symptoms: string[];
+  medications: string[];
+  barriers: string[];
+  concerns: string[];
+  followUpItems: string[];
+  eventIds: string[];
+  messageCount: number;
+};
+
 export type IntakeState = {
   patient: PatientProfile;
   sources: Source[];
   events: HealthEvent[];
+  contexts: ConversationContext[];
 };
 
 export type EmrPayload = {

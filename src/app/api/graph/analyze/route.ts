@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { aiExtractRelationships, isAiConfigured } from "@/lib/ai/extract";
 import { buildGraph } from "@/lib/graph/buildGraph";
-import type { GraphEdge, HealthEvent, Source } from "@/lib/schema";
+import type { ConversationContext, GraphEdge, HealthEvent, Source } from "@/lib/schema";
 
 export async function POST(request: Request) {
   try {
@@ -10,10 +10,12 @@ export async function POST(request: Request) {
       patientName,
       events,
       sources,
+      contexts,
     }: {
       patientName: string;
       events: HealthEvent[];
       sources: Source[];
+      contexts?: ConversationContext[];
     } = body;
 
     if (!patientName || !events) {
@@ -23,7 +25,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const baseGraph = buildGraph(patientName, events, sources ?? []);
+    const baseGraph = buildGraph(patientName, events, sources ?? [], contexts ?? []);
     let aiEdges: GraphEdge[] = [];
 
     if (isAiConfigured() && events.length >= 2) {

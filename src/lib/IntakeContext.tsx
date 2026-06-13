@@ -17,6 +17,7 @@ import {
   checkAiHealth,
   doctorNoteToText,
   extractFromText,
+  finalizeIntakeConversation,
 } from "@/lib/api/client";
 import { parseEmrFile } from "@/lib/ingest/emrParser";
 import { type DoctorNoteInput } from "@/lib/ingest/doctorNoteParser";
@@ -27,8 +28,10 @@ import {
   type EvidenceIndex,
   type SearchResult,
 } from "@/lib/index/evidenceIndex";
+import { type IntakeChatMessage } from "@/lib/ai/intakeAgent";
 import { workspaceKey } from "@/lib/auth/store";
 import type {
+  ConversationContext,
   GraphEdge,
   GraphNode,
   HealthEvent,
@@ -57,6 +60,7 @@ type IntakeContextValue = {
   graphFilterMode: "full" | "evidence";
   importEmrFile: (file: File) => Promise<void>;
   addVoiceNote: (transcript: string) => Promise<void>;
+  completeIntakeConversation: (messages: IntakeChatMessage[]) => Promise<void>;
   submitDoctorNote: (input: DoctorNoteInput) => Promise<void>;
   selectAlert: (id: string | null) => void;
   selectNode: (id: string | null) => void;
@@ -72,6 +76,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [sources, setSources] = useState<Source[]>([]);
   const [events, setEvents] = useState<HealthEvent[]>([]);
+  const [contexts, setContexts] = useState<ConversationContext[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
   const [graph, setGraph] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
@@ -95,8 +100,9 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
       patient: { id: user!.id, name: user!.name, dob: user!.dob },
       sources,
       events,
+      contexts,
     }),
-    [user, sources, events]
+    [user, sources, events, contexts]
   );
 
   useEffect(() => {
@@ -104,24 +110,34 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
     try {
       const raw = localStorage.getItem(workspaceKey(user.id));
       if (raw) {
-        const ws = JSON.parse(raw) as { sources: Source[]; events: HealthEvent[] };
+        const ws = JSON.parse(raw) as {
+          sources: Source[];
+          events: HealthEvent[];
+          contexts?: ConversationContext[];
+        };
         setSources(ws.sources ?? []);
         setEvents(ws.events ?? []);
+        setContexts(ws.contexts ?? []);
       } else {
         setSources([]);
         setEvents([]);
+        setContexts([]);
       }
     } catch {
       setSources([]);
       setEvents([]);
+      setContexts([]);
     }
     setHydrated(true);
   }, [user?.id]);
 
   useEffect(() => {
     if (!hydrated || !user) return;
-    localStorage.setItem(workspaceKey(user.id), JSON.stringify({ sources, events }));
-  }, [sources, events, user, hydrated]);
+    localStorage.setItem(
+      workspaceKey(user.id),
+      JSON.stringify({ sources, events, contexts })
+    );
+  }, [sources, events, contexts, user, hydrated]);
 
   useEffect(() => {
     checkAiHealth().then(({ aiConfigured: ok }) => setAiConfigured(ok));
@@ -134,11 +150,16 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
   const indexStats = useMemo(() => evidenceIndex.getStats(), [evidenceIndex]);
 
   const reanalyze = useCallback(
-    async (evts: HealthEvent[], srcs: Source[], patientName: string) => {
+    async (
+      evts: HealthEvent[],
+      srcs: Source[],
+      ctxs: ConversationContext[],
+      patientName: string
+    ) => {
       const seq = ++analyzeSeq.current;
       setProcessing({ active: true, message: "Building knowledge graph" });
       try {
-        const graphResult = await analyzeGraph(patientName, evts, srcs);
+        const graphResult = await analyzeGraph(patientName, evts, srcs, ctxs);
         if (seq !== analyzeSeq.current) return;
         setGraph({ nodes: graphResult.nodes, edges: graphResult.edges });
         setProcessing({ active: true, message: "Evaluating risk patterns" });
@@ -148,7 +169,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
         setProcessing({ active: false, message: "" });
       } catch (err) {
         if (seq !== analyzeSeq.current) return;
-        setGraph(buildGraph(patientName, evts, srcs));
+        setGraph(buildGraph(patientName, evts, srcs, ctxs));
         setAlerts(evaluateRiskRules(evts));
         setProcessing({ active: false, message: "" });
         setError(err instanceof Error ? err.message : "Analysis unavailable");
@@ -163,8 +184,17 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
       setAlerts([]);
       return;
     }
-    reanalyze(events, sources, user.name);
-  }, [events, sources, user, reanalyze]);
+    reanalyze(events, sources, contexts, user.name);
+  }, [events, sources, contexts, user, reanalyze]);
+
+  const appendConversation = useCallback(
+    (source: Source, newEvents: HealthEvent[], context: ConversationContext) => {
+      setSources((prev) => [...prev, source]);
+      setEvents((prev) => [...prev, ...newEvents]);
+      setContexts((prev) => [...prev, context]);
+    },
+    []
+  );
 
   const appendIngestion = useCallback((source: Source, newEvents: HealthEvent[]) => {
     setSources((prev) => [...prev, source]);
@@ -210,6 +240,27 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
     [user, appendIngestion]
   );
 
+  const completeIntakeConversation = useCallback(
+    async (messages: IntakeChatMessage[]) => {
+      if (!user) return;
+      if (!messages.some((m) => m.role === "user")) {
+        setError("Share a bit more with Intake before saving.");
+        return;
+      }
+      setError(null);
+      setProcessing({ active: true, message: "Parsing conversation for graph" });
+      try {
+        const result = await finalizeIntakeConversation(messages, user.id, user.name);
+        appendConversation(result.source, result.events, result.context);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Conversation save failed");
+      } finally {
+        setProcessing({ active: false, message: "" });
+      }
+    },
+    [user, appendConversation]
+  );
+
   const submitDoctorNote = useCallback(
     async (input: DoctorNoteInput) => {
       if (!user) return;
@@ -246,6 +297,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
     analyzeSeq.current++;
     setSources([]);
     setEvents([]);
+    setContexts([]);
     setGraph({ nodes: [], edges: [] });
     setAlerts([]);
     setSelectedAlertId(null);
@@ -253,7 +305,10 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
     setGraphFilterMode("full");
     setError(null);
     if (user) {
-      localStorage.setItem(workspaceKey(user.id), JSON.stringify({ sources: [], events: [] }));
+      localStorage.setItem(
+        workspaceKey(user.id),
+        JSON.stringify({ sources: [], events: [], contexts: [] })
+      );
     }
   }, [user]);
 
@@ -320,6 +375,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
         graphFilterMode,
         importEmrFile: importEmrFileHandler,
         addVoiceNote,
+        completeIntakeConversation,
         submitDoctorNote,
         selectAlert,
         selectNode: setSelectedNodeId,

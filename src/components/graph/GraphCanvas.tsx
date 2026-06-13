@@ -17,6 +17,7 @@ const NODE_STYLE: Record<string, { fill: string; stroke: string; ring: string }>
   task: { fill: "#1f6b8a", stroke: "#19566f", ring: "#d9ecf4" },
   barrier: { fill: "#b4233c", stroke: "#962038", ring: "#f5e0e4" },
   source: { fill: "#9ba3b4", stroke: "#7a8496", ring: "#e3e6ec" },
+  conversation: { fill: "#3d6b52", stroke: "#2f5540", ring: "#d9ebe2" },
 };
 
 const KIND_LABELS: Record<string, string> = {
@@ -29,6 +30,7 @@ const KIND_LABELS: Record<string, string> = {
   task: "Care task",
   barrier: "Barrier",
   source: "Source",
+  conversation: "Intake conversation",
 };
 
 const RELATION_LABELS: Record<string, string> = {
@@ -315,7 +317,14 @@ export function GraphCanvas() {
                     selectedAlertId &&
                     !isHighlighted &&
                     node.kind !== "patient";
-                  const radius = node.kind === "patient" ? 28 : node.kind === "source" ? 10 : 14;
+                  const radius =
+                    node.kind === "patient"
+                      ? 28
+                      : node.kind === "source"
+                        ? 10
+                        : node.kind === "conversation"
+                          ? 18
+                          : 14;
 
                   return (
                     <g
@@ -391,6 +400,10 @@ export function GraphCanvas() {
             </p>
             <h2 className="mt-1 font-display text-lg text-ink">{selectedNode.label}</h2>
 
+            {selectedNode.kind === "conversation" && (
+              <ConversationDetail metadata={selectedNode.metadata} />
+            )}
+
             {detailEvents.length > 0 && (
               <div className="mt-6">
                 <p className="text-xs font-medium uppercase tracking-wider text-ink-faint">
@@ -443,4 +456,44 @@ export function GraphCanvas() {
       </p>
     </div>
   );
+}
+
+function ConversationDetail({ metadata }: { metadata?: Record<string, unknown> }) {
+  if (!metadata) return null;
+
+  const summary = typeof metadata.summary === "string" ? metadata.summary : "";
+  const sections: { label: string; items: string[] }[] = [
+    { label: "Symptoms", items: stringArray(metadata.symptoms) },
+    { label: "Medications", items: stringArray(metadata.medications) },
+    { label: "Barriers", items: stringArray(metadata.barriers) },
+    { label: "Concerns", items: stringArray(metadata.concerns) },
+    { label: "Follow-up", items: stringArray(metadata.followUpItems) },
+  ].filter((section) => section.items.length > 0);
+
+  return (
+    <div className="mt-4 space-y-4">
+      {summary && (
+        <p className="text-sm leading-relaxed text-ink-muted">{summary}</p>
+      )}
+      {sections.map((section) => (
+        <div key={section.label}>
+          <p className="text-xs font-medium uppercase tracking-wider text-ink-faint">
+            {section.label}
+          </p>
+          <ul className="mt-2 space-y-1">
+            {section.items.map((item) => (
+              <li key={item} className="text-sm text-ink">
+                {item}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }

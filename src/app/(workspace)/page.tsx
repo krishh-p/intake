@@ -23,8 +23,8 @@ export default function OverviewPage() {
     },
     {
       href: "/import/voice",
-      title: "Add voice note",
-      description: "Capture symptoms and context in your own words",
+      title: "Talk to Intake",
+      description: "Live voice session with Intake",
     },
     {
       href: "/graph",
@@ -48,7 +48,7 @@ export default function OverviewPage() {
       {!hasData ? (
         <EmptyState
           title="Start by importing your data"
-          description="Upload medical records, add a voice note, or enter a clinician note. Intake will connect everything into a searchable health graph."
+          description="Upload medical records, talk to Intake, or enter a clinician note. Intake will connect everything into a searchable health graph."
           actionLabel="Import health data"
           actionHref="/import"
         />

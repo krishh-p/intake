@@ -1,15 +1,18 @@
 import type {
+  ConversationContext,
   GraphEdge,
   GraphNode,
   HealthEvent,
   Source,
 } from "@/lib/schema";
+import { addConversationNodesToGraph } from "@/lib/graph/conversationNode";
 import { generateId } from "@/lib/utils";
 
 export function buildGraph(
   patientName: string,
   events: HealthEvent[],
-  sources: Source[]
+  sources: Source[],
+  contexts: ConversationContext[] = []
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
@@ -74,6 +77,7 @@ export function buildGraph(
   }
 
   addClinicalRelationships(nodes, edges, events);
+  addConversationNodesToGraph(patientNode.id, nodes, edges, contexts, events);
 
   return { nodes, edges };
 }

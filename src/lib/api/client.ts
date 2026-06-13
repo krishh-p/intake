@@ -1,4 +1,6 @@
+import type { IntakeChatMessage, IntakeChatResponse } from "@/lib/ai/intakeAgent";
 import type {
+  ConversationContext,
   DoctorReport,
   GraphEdge,
   GraphNode,
@@ -16,6 +18,44 @@ export async function checkAiHealth(): Promise<{
 }> {
   const res = await fetch("/api/health");
   if (!res.ok) return { aiConfigured: false, model: "unknown" };
+  return res.json();
+}
+
+export async function chatWithIntake(
+  patientName: string,
+  messages: IntakeChatMessage[]
+): Promise<IntakeChatResponse> {
+  const res = await fetch("/api/intake/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ patientName, messages }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error ?? "Chat failed");
+  }
+  return res.json();
+}
+
+export async function finalizeIntakeConversation(
+  messages: IntakeChatMessage[],
+  patientId: string,
+  patientName: string
+): Promise<{
+  source: Source;
+  events: HealthEvent[];
+  context: ConversationContext;
+  method: string;
+}> {
+  const res = await fetch("/api/intake/finalize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages, patientId, patientName }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error ?? "Conversation parse failed");
+  }
   return res.json();
 }
 
@@ -40,7 +80,8 @@ export async function extractFromText(
 export async function analyzeGraph(
   patientName: string,
   events: HealthEvent[],
-  sources: Source[]
+  sources: Source[],
+  contexts: ConversationContext[] = []
 ): Promise<{
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -50,7 +91,7 @@ export async function analyzeGraph(
   const res = await fetch("/api/graph/analyze", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ patientName, events, sources }),
+    body: JSON.stringify({ patientName, events, sources, contexts }),
   });
   if (!res.ok) {
     const err = await res.json();
