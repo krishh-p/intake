@@ -264,6 +264,8 @@ export function GraphCanvas() {
   const [search, setSearch] = useState("");
   const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null);
   const panStart = useRef({ x: 0, y: 0, tx: 0, ty: 0 });
+  const wheelZoomTimeoutRef = useRef<number | null>(null);
+  const [isWheelZooming, setIsWheelZooming] = useState(false);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -275,7 +277,12 @@ export function GraphCanvas() {
       });
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      if (wheelZoomTimeoutRef.current !== null) {
+        window.clearTimeout(wheelZoomTimeoutRef.current);
+      }
+    };
   }, []);
 
   const baseGraph = displayGraph.nodes.length > 0 ? displayGraph : graph;
@@ -383,11 +390,33 @@ export function GraphCanvas() {
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
     e.preventDefault();
+    const bounds = containerRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+
+    const mouseX = e.clientX - bounds.left;
+    const mouseY = e.clientY - bounds.top;
     const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setTransform((t) => ({
-      ...t,
-      scale: Math.min(3.2, Math.max(0.32, t.scale * delta)),
-    }));
+
+    setIsWheelZooming(true);
+    if (wheelZoomTimeoutRef.current !== null) {
+      window.clearTimeout(wheelZoomTimeoutRef.current);
+    }
+
+    setTransform((t) => {
+      const newScale = Math.min(3.2, Math.max(0.32, t.scale * delta));
+      const scaleRatio = newScale / t.scale;
+      // Keep the graph point under the cursor fixed while scale changes.
+      return {
+        scale: newScale,
+        x: mouseX - (mouseX - t.x) * scaleRatio,
+        y: mouseY - (mouseY - t.y) * scaleRatio,
+      };
+    });
+
+    wheelZoomTimeoutRef.current = window.setTimeout(() => {
+      setIsWheelZooming(false);
+      wheelZoomTimeoutRef.current = null;
+    }, 80);
   }, []);
 
   const handleMouseDown = useCallback(
@@ -565,7 +594,7 @@ export function GraphCanvas() {
               </defs>
               <rect width="100%" height="100%" fill="#eef0e8" />
               <rect width="100%" height="100%" fill="url(#atlas-grid)" opacity="0.7" />
-              <g transform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`} style={{ transition: draggedNodeId || isPanning ? undefined : "transform 420ms cubic-bezier(.2,.8,.2,1)" }}>
+              <g transform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`} style={{ transition: draggedNodeId || isPanning || isWheelZooming ? undefined : "transform 420ms cubic-bezier(.2,.8,.2,1)" }}>
                 {Object.entries(CLUSTERS).map(([key, cluster]) => {
                   const center = layout.clusterCenter(key as ClusterKey);
                   const count = nodes.filter((node) => nodeCluster(node) === key).length;
