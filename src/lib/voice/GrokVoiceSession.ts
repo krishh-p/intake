@@ -126,10 +126,12 @@ export class GrokVoiceSession {
 
     const audioBuffer: Float32Array[] = [];
     let totalSamples = 0;
-    const chunkSizeSamples = (this.audioContext.sampleRate * CHUNK_DURATION_MS) / 1000;
+    const chunkSizeSamples =
+      (this.audioContext.sampleRate * CHUNK_DURATION_MS) / 1000;
 
     processor.onaudioprocess = (event) => {
-      if (this.inputMuted || this.agentOutputActive || !this.sessionConfigured) return;
+      if (this.inputMuted || this.agentOutputActive || !this.sessionConfigured)
+        return;
 
       const inputData = event.inputBuffer.getChannelData(0);
       audioBuffer.push(new Float32Array(inputData));
@@ -202,7 +204,8 @@ export class GrokVoiceSession {
         await this.connectWithProtocols(url, protocols, session);
         return;
       } catch (err) {
-        lastError = err instanceof Error ? err : new Error("Voice connection failed");
+        lastError =
+          err instanceof Error ? err : new Error("Voice connection failed");
       }
     }
 
@@ -212,7 +215,7 @@ export class GrokVoiceSession {
   private connectWithProtocols(
     url: string,
     protocols: string[],
-    session: SessionPayload
+    session: SessionPayload,
   ): Promise<void> {
     return new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(url, protocols);
@@ -234,7 +237,8 @@ export class GrokVoiceSession {
         if (this.ws === ws) {
           this.ws = null;
           const hadUserSpeech =
-            this.sessionConfigured && this.messages.some((m) => m.role === "user" && m.content.trim());
+            this.sessionConfigured &&
+            this.messages.some((m) => m.role === "user" && m.content.trim());
           this.sessionConfigured = false;
           this.config.onStatus("idle");
           if (hadUserSpeech && !this.ended) {
@@ -242,7 +246,8 @@ export class GrokVoiceSession {
           }
         }
       };
-      ws.onmessage = (event) => this.handleServerEvent(event.data as string, session);
+      ws.onmessage = (event) =>
+        this.handleServerEvent(event.data as string, session);
     });
   }
 
@@ -307,12 +312,18 @@ export class GrokVoiceSession {
       return;
     }
 
-    if (type === "response.output_audio.delta" && typeof event.delta === "string") {
+    if (
+      type === "response.output_audio.delta" &&
+      typeof event.delta === "string"
+    ) {
       this.playAudioChunk(event.delta);
       return;
     }
 
-    if (type === "response.output_audio_transcript.delta" && typeof event.delta === "string") {
+    if (
+      type === "response.output_audio_transcript.delta" &&
+      typeof event.delta === "string"
+    ) {
       this.appendAssistantTranscript(event.delta);
       return;
     }
@@ -347,7 +358,8 @@ export class GrokVoiceSession {
 
     if (type === "error") {
       const message =
-        (event.error as { message?: string } | undefined)?.message ?? "Voice session error";
+        (event.error as { message?: string } | undefined)?.message ??
+        "Voice session error";
       this.config.onError(message);
     }
   }
@@ -375,7 +387,10 @@ export class GrokVoiceSession {
     if (item.role !== "user" || !Array.isArray(item.content)) return;
 
     for (const entry of item.content as Record<string, unknown>[]) {
-      if (entry.type === "input_audio" && typeof entry.transcript === "string") {
+      if (
+        entry.type === "input_audio" &&
+        typeof entry.transcript === "string"
+      ) {
         this.updateUserTranscript(entry.transcript.trim());
         this.userDraftIndex = null;
         break;
@@ -389,10 +404,16 @@ export class GrokVoiceSession {
     const last = this.messages[this.messages.length - 1];
     if (last?.role === "assistant") {
       const next = [...this.messages];
-      next[next.length - 1] = { role: "assistant", content: this.assistantDraft };
+      next[next.length - 1] = {
+        role: "assistant",
+        content: this.assistantDraft,
+      };
       this.messages = next;
     } else {
-      this.messages = [...this.messages, { role: "assistant", content: this.assistantDraft }];
+      this.messages = [
+        ...this.messages,
+        { role: "assistant", content: this.assistantDraft },
+      ];
     }
     this.config.onMessages(this.messages);
   }
@@ -402,7 +423,10 @@ export class GrokVoiceSession {
     const last = this.messages[this.messages.length - 1];
     if (last?.role === "assistant") {
       const next = [...this.messages];
-      next[next.length - 1] = { role: "assistant", content: this.assistantDraft.trim() };
+      next[next.length - 1] = {
+        role: "assistant",
+        content: this.assistantDraft.trim(),
+      };
       this.messages = next;
     } else {
       this.messages = [
@@ -457,7 +481,11 @@ export class GrokVoiceSession {
       return;
     }
 
-    const audioBuffer = this.audioContext.createBuffer(1, chunk.length, this.audioContext.sampleRate);
+    const audioBuffer = this.audioContext.createBuffer(
+      1,
+      chunk.length,
+      this.audioContext.sampleRate,
+    );
     audioBuffer.getChannelData(0).set(chunk);
 
     const source = this.audioContext.createBufferSource();
