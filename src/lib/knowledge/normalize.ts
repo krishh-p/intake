@@ -1,31 +1,27 @@
 import type { GraphNodeKind, HealthEventType } from "@/lib/schema";
+import { groundConcept, titleCase } from "@/lib/knowledge/ontology";
 
-const SYNONYMS: Array<{ pattern: RegExp; canonical: string }> = [
-  { pattern: /\b(chronic kidney disease|ckd|kidney disease)\b/i, canonical: "Chronic kidney disease" },
-  { pattern: /\b(nsaid|advil|motrin|ibuprofen)\b/i, canonical: "Ibuprofen / NSAID use" },
-  { pattern: /\b(shortness of breath|sob|breathless)\b/i, canonical: "Shortness of breath" },
-  { pattern: /\b(swelling|edema)\b/i, canonical: "Edema / swelling" },
-  { pattern: /\b(a1c|hba1c)\b/i, canonical: "HbA1c" },
-  { pattern: /\begfr\b/i, canonical: "eGFR" },
-  { pattern: /\bpotassium\b/i, canonical: "Potassium" },
-  { pattern: /\blisinopril\b/i, canonical: "Lisinopril" },
-  { pattern: /\bmetformin\b/i, canonical: "Metformin" },
-  { pattern: /\bdiabetes\b/i, canonical: "Diabetes" },
-];
-
-export function normalizeLabel(label: string): string {
+/**
+ * Canonicalize a free-text label to a stable display form. Delegates to the
+ * clinical ontology (lexicon + alias matching) and falls back to title-casing
+ * with terminology-aware fixups for unknown terms.
+ */
+export function normalizeLabel(label: string, kind?: HealthEventType): string {
   const trimmed = label.replace(/\s+/g, " ").trim();
-  for (const synonym of SYNONYMS) {
-    if (synonym.pattern.test(trimmed)) return synonym.canonical;
-  }
-  return trimmed
-    .toLowerCase()
-    .replace(/\b\w/g, (c) => c.toUpperCase())
+  if (!trimmed) return trimmed;
+  const grounded = groundConcept(trimmed, kind);
+  if (grounded.known) return grounded.canonical;
+  return titleCase(trimmed)
     .replace(/\bEgfr\b/g, "eGFR")
-    .replace(/\bHba1c\b/g, "HbA1c");
+    .replace(/\bHba1c\b/g, "HbA1c")
+    .replace(/\bLdl\b/g, "LDL")
+    .replace(/\bTsh\b/g, "TSH")
+    .replace(/\bInr\b/g, "INR")
+    .replace(/\bCkd\b/g, "CKD")
+    .replace(/\bCopd\b/g, "COPD");
 }
 
-export function canonicalKey(kind: string, label: string) {
+export function canonicalKey(kind: string, label: string): string {
   return `${kind}:${normalizeLabel(label).toLowerCase()}`;
 }
 

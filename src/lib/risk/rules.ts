@@ -1,190 +1,242 @@
+/**
+ * Risk engine (general, ontology-driven).
+ *
+ * Derives transparent, source-backed risk alerts from any patient's data by
+ * reasoning over the clinical knowledge base rather than hardcoded scenarios:
+ *   - Medication ↔ condition contraindications.
+ *   - Medication ↔ medication interactions.
+ *   - Out-of-range labs/vitals (direction-aware).
+ *   - Worsening lab trends.
+ *   - Care-access barriers.
+ *   - Drug–lab monitoring gaps.
+ */
+
 import type { HealthEvent, RiskAlert } from "@/lib/schema";
-import { generateId } from "@/lib/utils";
+import {
+  CONTRAINDICATION_RULES,
+  INTERACTION_RULES,
+  groundConcept,
+  interpretLabValue,
+  isAbnormalConcerning,
+  parseBloodPressure,
+  type GroundedConcept,
+  type Severity,
+  type Specialty,
+} from "@/lib/knowledge/ontology";
+import { normalizeLabel } from "@/lib/knowledge/normalize";
+import { computeTrends, type TrendInput } from "@/lib/knowledge/temporal";
+import { stableId } from "@/lib/utils";
 
-function getLabs(events: HealthEvent[], label: string) {
-  return events
-    .filter((e) => e.type === "lab" && e.label === label)
-    .sort((a, b) => new Date(a.observedAt).getTime() - new Date(b.observedAt).getTime());
+type GroundedEvent = {
+  event: HealthEvent;
+  concept: GroundedConcept;
+};
+
+function ground(events: HealthEvent[]): GroundedEvent[] {
+  return events.map((event) => ({
+    event,
+    concept: groundConcept(normalizeLabel(event.label, event.type), event.type),
+  }));
 }
 
-function hasCondition(events: HealthEvent[], pattern: RegExp) {
-  return events.some((e) => e.type === "condition" && pattern.test(e.label));
-}
-
-function hasSymptom(events: HealthEvent[], pattern: RegExp) {
-  return events.some((e) => e.type === "symptom" && pattern.test(e.label));
-}
-
-function hasMedication(events: HealthEvent[], pattern: RegExp) {
-  return events.some((e) => e.type === "medication" && pattern.test(e.label));
-}
-
-function hasBarrier(events: HealthEvent[], pattern: RegExp) {
-  return events.some((e) => e.type === "barrier" && pattern.test(e.label));
-}
-
-function getHighBpEvents(events: HealthEvent[]) {
-  return events.filter((e) => {
-    if (e.type !== "vital" || e.label !== "Blood pressure") return false;
-    const val = String(e.value ?? "");
-    const match = val.match(/(\d+)\//);
-    if (!match) return false;
-    return parseInt(match[1], 10) >= 140;
-  });
-}
-
-function collectIds(...groups: HealthEvent[][]) {
-  return groups.flat().map((e) => e.id);
+function specialtyLabels(specialties: Specialty[]): string[] {
+  const map: Record<Specialty, string> = {
+    primary_care: "primary care",
+    cardiology: "cardiology",
+    nephrology: "nephrology",
+    endocrinology: "endocrinology",
+    pharmacy: "pharmacy",
+    pulmonology: "pulmonology",
+    psychiatry: "psychiatry",
+    gastroenterology: "gastroenterology",
+    neurology: "neurology",
+    rheumatology: "rheumatology",
+  };
+  return specialties.map((s) => map[s]);
 }
 
 export function evaluateRiskRules(events: HealthEvent[]): RiskAlert[] {
+  const grounded = ground(events);
+  const meds = grounded.filter((g) => g.event.type === "medication");
+  const conditions = grounded.filter((g) => g.event.type === "condition");
+  const labsVitals = grounded.filter((g) => g.event.type === "lab" || g.event.type === "vital");
+  const barriers = grounded.filter((g) => g.event.type === "barrier");
+
   const alerts: RiskAlert[] = [];
+  const seen = new Set<string>();
+  const push = (alert: RiskAlert) => {
+    const key = alert.title.toLowerCase();
+    if (seen.has(key) || alert.evidenceEventIds.length === 0) return;
+    seen.add(key);
+    alerts.push(alert);
+  };
 
-  const egfrLabs = getLabs(events, "eGFR");
-  const potassiumLabs = getLabs(events, "Potassium");
-  const a1cLabs = getLabs(events, "HbA1c");
-  const ckdEvents = events.filter(
-    (e) => e.type === "condition" && /kidney|ckd/i.test(e.label)
-  );
-  const ibuprofenEvents = events.filter(
-    (e) => e.type === "medication" && /ibuprofen/i.test(e.label)
-  );
-  const edemaEvents = events.filter(
-    (e) => e.type === "symptom" && /swelling|edema/i.test(e.label)
-  );
-  const sobEvents = events.filter(
-    (e) => e.type === "symptom" && /shortness of breath/i.test(e.label)
-  );
-  const missedNephEvents = events.filter(
-    (e) => e.type === "barrier" && /nephrology/i.test(e.label)
-  );
-  const refillEvents = events.filter(
-    (e) => e.type === "barrier" && /refill/i.test(e.label)
-  );
-  const highBpEvents = getHighBpEvents(events);
-
-  if (egfrLabs.length >= 2 && potassiumLabs.length >= 1) {
-    const firstEgfr = Number(egfrLabs[0].value);
-    const lastEgfr = Number(egfrLabs[egfrLabs.length - 1].value);
-    const lastK = Number(potassiumLabs[potassiumLabs.length - 1].value);
-
-    if (lastEgfr < firstEgfr && lastK >= 5.0) {
-      alerts.push({
-        id: generateId("alert"),
-        severity: "high",
-        title: "Kidney function and potassium safety risk",
-        timeHorizon: "Now — next 2 weeks",
-        specialty: ["nephrology", "primary care", "pharmacy"],
-        explanation:
-          "eGFR has fallen over time while potassium is elevated. This pattern suggests worsening kidney function with electrolyte risk, especially with current medications.",
-        evidenceEventIds: collectIds(egfrLabs, potassiumLabs, ckdEvents),
-        suggestedQuestions: [
-          "Should I stop or avoid ibuprofen and other NSAIDs?",
-          "Do I need repeat BMP labs sooner than two weeks?",
-          "Is my lisinopril dose still safe with these kidney numbers?",
-        ],
+  // 1. Medication ↔ condition contraindications.
+  for (const med of meds) {
+    const classes = med.concept.classes ?? [];
+    for (const rule of CONTRAINDICATION_RULES) {
+      if (!classes.includes(rule.drugClass)) continue;
+      const condMatches = conditions.filter(
+        (c) =>
+          (rule.condition.canonical && c.concept.canonical === rule.condition.canonical) ||
+          (rule.condition.category && c.concept.category === rule.condition.category)
+      );
+      if (condMatches.length === 0) continue;
+      const condition = condMatches[0];
+      push({
+        id: stableId("alert", `contra:${rule.id}:${med.concept.canonical}`),
+        severity: rule.severity,
+        title: `${med.concept.canonical} with ${condition.concept.canonical}`,
+        timeHorizon: rule.severity === "high" ? "Now" : "Next 2 weeks",
+        specialty: specialtyLabels(rule.specialties),
+        explanation: rule.rationale,
+        evidenceEventIds: [med.event.id, ...condMatches.map((c) => c.event.id)],
+        suggestedQuestions: rule.questions,
       });
     }
   }
 
-  if (
-    (hasCondition(events, /kidney|ckd/i) || ckdEvents.length > 0) &&
-    hasMedication(events, /ibuprofen/i)
-  ) {
-    alerts.push({
-      id: generateId("alert"),
-      severity: "high",
-      title: "NSAID use with chronic kidney disease",
-      timeHorizon: "Now",
-      specialty: ["nephrology", "pharmacy", "primary care"],
-      explanation:
-        "Daily ibuprofen use combined with known chronic kidney disease increases risk of further kidney injury and elevated potassium, especially alongside ACE inhibitor therapy.",
-      evidenceEventIds: collectIds(ckdEvents, ibuprofenEvents),
-      suggestedQuestions: [
-        "What can I take instead of ibuprofen for knee pain?",
-        "Should urgent care have avoided prescribing an NSAID?",
-        "Do I need medication reconciliation across all my doctors?",
-      ],
-    });
+  // 2. Medication ↔ medication interactions.
+  for (let i = 0; i < meds.length; i++) {
+    for (let j = i + 1; j < meds.length; j++) {
+      const a = meds[i];
+      const b = meds[j];
+      const ca = a.concept.classes ?? [];
+      const cb = b.concept.classes ?? [];
+      for (const rule of INTERACTION_RULES) {
+        const direct = ca.includes(rule.classA) && cb.includes(rule.classB);
+        const swapped = ca.includes(rule.classB) && cb.includes(rule.classA);
+        if (!direct && !swapped) continue;
+        push({
+          id: stableId("alert", `inter:${rule.id}:${a.concept.canonical}:${b.concept.canonical}`),
+          severity: rule.severity,
+          title: `${a.concept.canonical} + ${b.concept.canonical} interaction`,
+          timeHorizon: rule.severity === "high" ? "Now" : "Next 2 weeks",
+          specialty: specialtyLabels(rule.specialties),
+          explanation: rule.rationale,
+          evidenceEventIds: [a.event.id, b.event.id],
+          suggestedQuestions: rule.questions,
+        });
+      }
+    }
   }
 
-  if (hasSymptom(events, /swelling|edema/i) || hasSymptom(events, /shortness of breath/i)) {
-    alerts.push({
-      id: generateId("alert"),
-      severity: "high",
-      title: "Possible fluid overload before cardiology visit",
-      timeHorizon: "Before next cardiology appointment",
-      specialty: ["cardiology", "primary care", "nephrology"],
-      explanation:
-        "New ankle swelling and shortness of breath on exertion may signal fluid retention or heart failure, especially with hypertension, kidney disease, and recent medication changes.",
-      evidenceEventIds: collectIds(edemaEvents, sobEvents, highBpEvents),
-      suggestedQuestions: [
-        "Could these symptoms mean my heart is not pumping effectively?",
-        "Should I be weighed daily or restrict salt/fluid?",
-        "Do you need an updated echocardogram before my visit?",
-      ],
-    });
+  // 3. Out-of-range labs/vitals (latest reading per concept).
+  const latestByLab = new Map<string, GroundedEvent>();
+  for (const g of labsVitals) {
+    const key = g.concept.canonical;
+    const prev = latestByLab.get(key);
+    if (!prev || new Date(g.event.observedAt) > new Date(prev.event.observedAt)) {
+      latestByLab.set(key, g);
+    }
   }
-
-  if (a1cLabs.length >= 2) {
-    const first = Number(a1cLabs[0].value);
-    const last = Number(a1cLabs[a1cLabs.length - 1].value);
-    if (last > first) {
-      alerts.push({
-        id: generateId("alert"),
+  for (const [, g] of latestByLab) {
+    const bp = parseBloodPressure(g.event.value);
+    if (g.concept.canonical === "Blood pressure" && bp) {
+      if (bp.systolic >= 140 || bp.diastolic >= 90) {
+        push({
+          id: stableId("alert", `bp:${g.event.id}`),
+          severity: bp.systolic >= 160 || bp.diastolic >= 100 ? "high" : "medium",
+          title: "Elevated blood pressure",
+          timeHorizon: "Next 2 weeks",
+          specialty: ["primary care", "cardiology"],
+          explanation: `Most recent blood pressure was ${bp.systolic}/${bp.diastolic} mmHg, above the usual ≥140/90 threshold for concern.`,
+          evidenceEventIds: [g.event.id],
+          suggestedQuestions: [
+            "Is my blood pressure regimen still adequate?",
+            "Should I monitor my blood pressure at home?",
+          ],
+        });
+      }
+      continue;
+    }
+    const flag = interpretLabValue(g.concept, g.event.value);
+    if (isAbnormalConcerning(g.concept, flag)) {
+      push({
+        id: stableId("alert", `lab:${g.event.id}`),
         severity: "medium",
-        title: "Diabetes control worsening trend",
-        timeHorizon: "Next 90 days",
-        specialty: ["endocrinology", "primary care"],
-        explanation:
-          `HbA1c has risen from ${first}% to ${last}% over recent labs, suggesting diabetes control is slipping despite metformin.`,
-        evidenceEventIds: collectIds(a1cLabs),
+        title: `${g.concept.canonical} out of range`,
+        timeHorizon: "Next 2 weeks",
+        specialty: specialtyLabels(g.concept.specialties.length ? g.concept.specialties : ["primary_care"]),
+        explanation: `Most recent ${g.concept.canonical} of ${g.event.value}${g.event.unit ? ` ${g.event.unit}` : ""} is ${flag} relative to its reference range.`,
+        evidenceEventIds: [g.event.id],
         suggestedQuestions: [
-          "Should my diabetes medication be adjusted?",
-          "Are kidney changes limiting my treatment options?",
-          "Would diabetes education or CGM help right now?",
+          `What is causing my ${g.concept.canonical} to be ${flag}?`,
+          "Do I need a repeat test or treatment change?",
         ],
       });
     }
   }
 
-  if (highBpEvents.length >= 2 || refillEvents.length > 0) {
-    alerts.push({
-      id: generateId("alert"),
+  // 4. Worsening lab trends.
+  const trendInputs: TrendInput[] = labsVitals.map((g) => ({
+    kind: g.event.type,
+    label: g.event.label,
+    normalizedLabel: g.concept.canonical,
+    value: g.event.value,
+    unit: g.event.unit,
+    observedAt: g.event.observedAt,
+  }));
+  const trends = computeTrends(trendInputs);
+  for (const [, trend] of trends) {
+    if (!trend.worsening) continue;
+    const related = labsVitals.filter((g) => g.concept.canonical === trend.label);
+    push({
+      id: stableId("alert", `trend:${trend.label}`),
       severity: "medium",
-      title: "Blood pressure control at risk",
-      timeHorizon: "Next 2 weeks",
-      specialty: ["primary care", "cardiology", "pharmacy"],
-      explanation:
-        "Recent blood pressure readings remain above goal, and a delayed lisinopril refill may have interrupted therapy.",
-      evidenceEventIds: collectIds(highBpEvents, refillEvents),
+      title: `${trend.label} worsening trend`,
+      timeHorizon: "Next 90 days",
+      specialty: specialtyLabels(
+        related[0]?.concept.specialties.length ? related[0].concept.specialties : ["primary_care"]
+      ),
+      explanation: `${trend.label} has moved ${trend.direction} from ${trend.first} to ${trend.last}${trend.unit ? ` ${trend.unit}` : ""} across ${trend.points} readings, a clinically unfavorable direction.`,
+      evidenceEventIds: related.map((g) => g.event.id),
       suggestedQuestions: [
-        "Was my BP higher because I missed lisinopril doses?",
-        "Should I check BP at home daily until the refill is stable?",
-        "Do I need a dose change given kidney function?",
+        `Why is my ${trend.label} trending the wrong way?`,
+        "Does my treatment plan need to change?",
       ],
     });
   }
 
-  if (hasBarrier(events, /insurance|nephrology/i)) {
-    alerts.push({
-      id: generateId("alert"),
+  // 5. Drug–lab monitoring gaps.
+  for (const med of meds) {
+    const monitor = med.concept.monitorLabs ?? [];
+    if (monitor.length === 0) continue;
+    const missing = monitor.filter(
+      (lab) => !labsVitals.some((g) => g.concept.canonical === lab)
+    );
+    if (missing.length === monitor.length && monitor.length > 0) {
+      push({
+        id: stableId("alert", `monitor:${med.concept.canonical}`),
+        severity: "low",
+        title: `Monitoring gap for ${med.concept.canonical}`,
+        timeHorizon: "Next visit",
+        specialty: ["pharmacy", "primary care"],
+        explanation: `${med.concept.canonical} typically requires monitoring of ${monitor.join(", ")}, but no recent results are on file.`,
+        evidenceEventIds: [med.event.id],
+        suggestedQuestions: [`Should I have ${monitor.join(" or ")} checked?`],
+      });
+    }
+  }
+
+  // 6. Care-access barriers.
+  for (const barrier of barriers) {
+    push({
+      id: stableId("alert", `barrier:${barrier.event.id}`),
       severity: "medium",
-      title: "Missed nephrology follow-up due to insurance change",
+      title: `Care barrier: ${barrier.event.label}`,
       timeHorizon: "Next appointment",
-      specialty: ["nephrology", "primary care", "insurance navigator"],
-      explanation:
-        "A missed kidney specialist visit during worsening labs creates a care-navigation gap that may delay medication and monitoring decisions.",
-      evidenceEventIds: collectIds(missedNephEvents, egfrLabs),
+      specialty: ["primary care"],
+      explanation: `A reported barrier ("${barrier.event.label}") may be interrupting needed care or medication.`,
+      evidenceEventIds: [barrier.event.id],
       suggestedQuestions: [
-        "Can you help me get back in with nephrology under my new insurance?",
-        "Is repeat BMP enough while I wait for that visit?",
-        "Are there patient assistance options if cost is a barrier?",
+        "Can you help me resolve this barrier to care?",
+        "What should I do in the meantime?",
       ],
     });
   }
 
-  const severityOrder = { high: 0, medium: 1, low: 2 };
+  const severityOrder: Record<Severity, number> = { high: 0, medium: 1, low: 2 };
   return alerts.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
 }
 

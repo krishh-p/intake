@@ -102,6 +102,58 @@ export async function analyzeGraph(
   return res.json();
 }
 
+export type SemanticEvidenceRow = {
+  ref_type: "fact" | "chunk";
+  ref_id: string;
+  source_id: string;
+  label: string;
+  score: number;
+};
+
+/**
+ * Semantic evidence search. Embeds the query with Supabase's built-in gte-small
+ * model and runs a cosine-kNN over the signed-in user's own rows — all in a
+ * single Edge Function round trip, off the Vercel hot path. Returns null on any
+ * failure (model/edge unavailable, not signed in) so callers fall back to
+ * lexical-only retrieval.
+ */
+export async function searchEvidenceSemantic(
+  query: string,
+  matchCount = 12,
+): Promise<SemanticEvidenceRow[] | null> {
+  if (!query.trim()) return [];
+  try {
+    const { getAuthenticatedSupabase } = await import("@/lib/supabase/client");
+    const auth = await getAuthenticatedSupabase();
+    if (!auth) return null;
+    const { data, error } = await auth.supabase.functions.invoke("evidence-ai", {
+      body: { action: "search", query, match_count: matchCount },
+    });
+    if (error) return null;
+    return ((data as { results?: SemanticEvidenceRow[] } | null)?.results ??
+      null) as SemanticEvidenceRow[] | null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Backfill embeddings for the signed-in user's rows that don't have one yet.
+ * Idempotent and best-effort; runs off the hot path (after a sync / on load).
+ */
+export async function indexWorkspaceEmbeddings(): Promise<void> {
+  try {
+    const { getAuthenticatedSupabase } = await import("@/lib/supabase/client");
+    const auth = await getAuthenticatedSupabase();
+    if (!auth) return;
+    await auth.supabase.functions.invoke("evidence-ai", {
+      body: { action: "index" },
+    });
+  } catch {
+    // best-effort: semantic ranking simply won't include un-embedded rows yet
+  }
+}
+
 export async function analyzeRisk(
   events: HealthEvent[]
 ): Promise<{ alerts: RiskAlert[]; method: string }> {

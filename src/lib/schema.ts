@@ -1,5 +1,31 @@
 export type SourceType = "emr" | "voice" | "doctor_note" | "manual";
 
+/** Terminology systems we ground concepts to (UMLS-style cross references). */
+export type CodingSystem = "SNOMED" | "RxNorm" | "LOINC" | "ICD10" | "INTERNAL";
+
+export type Coding = {
+  system: CodingSystem;
+  code: string;
+  display: string;
+};
+
+/** Out-of-range interpretation of a numeric lab/vital value. */
+export type LabFlag = "normal" | "high" | "low" | "unknown";
+
+/** Direction + magnitude of a time-ordered lab series. */
+export type TrendSummary = {
+  label: string;
+  unit?: string;
+  direction: "rising" | "falling" | "stable";
+  worsening: boolean;
+  first: number;
+  last: number;
+  delta: number;
+  points: number;
+  firstObservedAt: string;
+  lastObservedAt: string;
+};
+
 export type Source = {
   id: string;
   type: SourceType;
@@ -83,6 +109,18 @@ export type CandidateFact = {
   evidenceQuote?: string;
   negated?: boolean;
   uncertain?: boolean;
+  /** Terminology grounding for this fact's concept, when known. */
+  coding?: Coding;
+  /**
+   * Bitemporal validity. `validFrom`/`validTo` describe when the fact was true
+   * in the real world (NULL `validTo` = still current); `recordedAt` is when
+   * the system learned it. Enables point-in-time and supersession reasoning.
+   */
+  validFrom?: string;
+  validTo?: string;
+  recordedAt?: string;
+  /** Interpretation of a numeric lab/vital against its reference range. */
+  labFlag?: LabFlag;
   metadata?: Record<string, unknown>;
 };
 
@@ -102,6 +140,14 @@ export type Entity = {
   confidence: number;
   reviewStatus: ReviewStatus;
   factIds: string[];
+  /** Terminology grounding (SNOMED/RxNorm/LOINC) when the concept is known. */
+  coding?: Coding;
+  /** Pharmacologic classes for medications (drives interaction reasoning). */
+  drugClasses?: string[];
+  /** Broad disease category for conditions (drives category-level rules). */
+  category?: string;
+  /** Specialties this concept routes to. */
+  specialties?: string[];
   metadata?: Record<string, unknown>;
 };
 
@@ -115,13 +161,16 @@ export type GraphRelationship = {
   evidenceFactIds: string[];
   provenance: Provenance[];
   reviewStatus: ReviewStatus;
+  /** Human-readable clinical justification for this edge. */
+  rationale?: string;
+  severity?: "high" | "medium" | "low";
   metadata?: Record<string, unknown>;
 };
 
 export type ReviewItem = {
   id: string;
   patientId: string;
-  targetType: "fact" | "entity" | "relationship";
+  targetType: "fact" | "entity" | "relationship" | "contradiction";
   targetId: string;
   reason: string;
   status: "open" | "resolved";

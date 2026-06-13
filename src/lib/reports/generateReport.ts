@@ -1,3 +1,12 @@
+/**
+ * Specialty visit-brief generator (general, data-driven).
+ *
+ * Builds a pre-visit brief from the patient's actual facts and alerts — no
+ * hardcoded patient narrative. Concept→specialty relevance comes from the
+ * ontology, summaries are composed dynamically, and lab trends are surfaced
+ * direction-aware.
+ */
+
 import type {
   DoctorReport,
   HealthEvent,
@@ -5,6 +14,31 @@ import type {
   RiskAlert,
   Source,
 } from "@/lib/schema";
+import {
+  groundConcept,
+  interpretLabValue,
+  isAbnormalConcerning,
+  type GroundedConcept,
+  type Specialty,
+} from "@/lib/knowledge/ontology";
+import { normalizeLabel } from "@/lib/knowledge/normalize";
+import { computeTrends, type TrendInput } from "@/lib/knowledge/temporal";
+
+const SPECIALTY_LABELS: Record<ReportSpecialty, string> = {
+  primary_care: "Primary Care",
+  cardiology: "Cardiology",
+  nephrology: "Nephrology",
+  endocrinology: "Endocrinology",
+  pharmacy: "Pharmacy / Medication Review",
+};
+
+const REPORT_TO_SPECIALTY: Record<ReportSpecialty, Specialty> = {
+  primary_care: "primary_care",
+  cardiology: "cardiology",
+  nephrology: "nephrology",
+  endocrinology: "endocrinology",
+  pharmacy: "pharmacy",
+};
 
 function sortByDate(events: HealthEvent[]) {
   return [...events].sort(
@@ -16,38 +50,25 @@ function filterByType(events: HealthEvent[], types: HealthEvent["type"][]) {
   return events.filter((e) => types.includes(e.type));
 }
 
-function filterAlertsForSpecialty(alerts: RiskAlert[], specialty: ReportSpecialty) {
-  const map: Record<ReportSpecialty, string[]> = {
-    primary_care: ["primary care", "insurance navigator"],
-    cardiology: ["cardiology"],
-    nephrology: ["nephrology"],
-    endocrinology: ["endocrinology"],
-    pharmacy: ["pharmacy"],
-  };
-  const keys = map[specialty];
-  return alerts.filter((a) =>
-    a.specialty.some((s) => keys.some((k) => s.toLowerCase().includes(k.split(" ")[0])))
-  );
+function isRelevant(concept: GroundedConcept, specialty: ReportSpecialty): boolean {
+  if (specialty === "primary_care") return true;
+  if (specialty === "pharmacy") return concept.kind === "medication" || concept.kind === "lab";
+  return concept.specialties.includes(REPORT_TO_SPECIALTY[specialty]);
 }
 
-function formatLabTrend(events: HealthEvent[], label: string) {
-  const labs = events
-    .filter((e) => e.type === "lab" && e.label === label)
-    .sort((a, b) => new Date(a.observedAt).getTime() - new Date(b.observedAt).getTime());
-  if (labs.length === 0) return null;
-  if (labs.length === 1) return `${label} ${labs[0].value} ${labs[0].unit ?? ""}`.trim();
-  const first = labs[0];
-  const last = labs[labs.length - 1];
-  return `${label} trend: ${first.value} → ${last.value} ${last.unit ?? ""}`.trim();
+function filterAlertsForSpecialty(alerts: RiskAlert[], specialty: ReportSpecialty): RiskAlert[] {
+  if (specialty === "primary_care") return alerts;
+  const target = REPORT_TO_SPECIALTY[specialty].replace("_", " ");
+  const keyword = target.split(" ")[0];
+  return alerts.filter((a) => a.specialty.some((s) => s.toLowerCase().includes(keyword)));
 }
 
-const SPECIALTY_LABELS: Record<ReportSpecialty, string> = {
-  primary_care: "Primary Care",
-  cardiology: "Cardiology",
-  nephrology: "Nephrology",
-  endocrinology: "Endocrinology",
-  pharmacy: "Pharmacy / Medication Review",
-};
+function describeList(items: string[], max = 4): string {
+  if (items.length === 0) return "";
+  const shown = items.slice(0, max);
+  const extra = items.length - shown.length;
+  return shown.join(", ") + (extra > 0 ? `, and ${extra} more` : "");
+}
 
 export function generateReport(
   specialty: ReportSpecialty,
@@ -59,141 +80,123 @@ export function generateReport(
   const meds = sortByDate(filterByType(events, ["medication"]));
   const labsAndVitals = sortByDate(filterByType(events, ["lab", "vital"]));
   const symptoms = sortByDate(filterByType(events, ["symptom"]));
+  const conditions = sortByDate(filterByType(events, ["condition"]));
   const barriers = sortByDate(filterByType(events, ["barrier"]));
+  const careTasks = sortByDate(filterByType(events, ["care_task"]));
+
   const relevantAlerts = filterAlertsForSpecialty(alerts, specialty);
   const usedSourceIds = new Set(events.map((e) => e.sourceId));
   const evidenceSources = sources.filter((s) => usedSourceIds.has(s.id));
 
-  const egfrTrend = formatLabTrend(events, "eGFR");
-  const kTrend = formatLabTrend(events, "Potassium");
-  const a1cTrend = formatLabTrend(events, "HbA1c");
+  // Compute trends + flag abnormal labs (direction-aware).
+  const trendInputs: TrendInput[] = labsAndVitals.map((e) => ({
+    kind: e.type,
+    label: e.label,
+    normalizedLabel: normalizeLabel(e.label, e.type),
+    value: e.value,
+    unit: e.unit,
+    observedAt: e.observedAt,
+  }));
+  const trends = computeTrends(trendInputs);
+  const worseningTrends = Array.from(trends.values()).filter((t) => t.worsening);
 
-  const configs: Record<
-    ReportSpecialty,
-    { summary: string; concerns: string[]; questions: string[]; timeline: HealthEvent[]; context: HealthEvent[] }
-  > = {
-    cardiology: {
-      summary: `${patientName} is a 58-year-old with hypertension, type 2 diabetes, and stage 3a CKD presenting with new ankle swelling and exertional shortness of breath. Recent BP readings remain elevated (146–152/90–94 mmHg). She reports daily ibuprofen use and a delayed lisinopril refill. Cardiology visit is scheduled next month; latest kidney labs may not yet be in the cardiology record.`,
-      concerns: [
-        "New edema and shortness of breath — evaluate for fluid overload or heart failure",
-        "Persistently elevated blood pressure despite ACE inhibitor therapy",
-        "NSAID use and refill gap may be contributing to volume and BP instability",
-        ...(relevantAlerts.slice(0, 2).map((a) => a.title)),
-      ],
-      questions: [
-        "Given new swelling and SOB, do I need echo or BNP testing before my visit?",
-        "Should I restrict sodium or fluid until evaluated?",
-        "Is my current antihypertensive plan adequate with declining kidney function?",
-        "How should ibuprofen use be addressed given cardiac and kidney risk?",
-      ],
-      timeline: sortByDate([
-        ...symptoms,
-        ...labsAndVitals.filter((e) => /blood pressure|potassium|egfr/i.test(e.label)),
-        ...filterByType(events, ["encounter"]).filter((e) =>
-          /cardiology/i.test(String(e.metadata?.specialty ?? e.label))
-        ),
-      ]).slice(0, 8),
-      context: [...symptoms, ...barriers.filter((e) => /refill/i.test(e.label))],
-    },
-    nephrology: {
-      summary: `${patientName} has stage 3a CKD with a concerning downward eGFR trend${egfrTrend ? ` (${egfrTrend})` : ""} and rising potassium${kTrend ? ` (${kTrend})` : ""}. She missed nephrology follow-up after an insurance change and is taking daily ibuprofen for knee pain while on lisinopril. PCP ordered repeat BMP in two weeks. Patient-reported edema and fatigue may reflect worsening kidney-related fluid retention.`,
-      concerns: [
-        "Worsening kidney function with hyperkalemia risk",
-        "Daily NSAID use in setting of CKD and ACE inhibitor",
-        "Missed nephrology follow-up and care-navigation gap",
-        "Repeat BMP ordered — ensure results reach all specialists",
-        ...(relevantAlerts.slice(0, 1).map((a) => a.title)),
-      ],
-      questions: [
-        "Should I stop ibuprofen immediately?",
-        "Is lisinopril still appropriate at this eGFR and potassium level?",
-        "Can you help coordinate nephrology re-establishment under new insurance?",
-        "What BP and diet targets should I follow until repeat labs?",
-      ],
-      timeline: sortByDate([
-        ...labsAndVitals.filter((e) => /egfr|potassium|creatinine/i.test(e.label)),
-        ...meds.filter((e) => /ibuprofen|lisinopril/i.test(e.label)),
-        ...barriers,
-        ...filterByType(events, ["care_task"]).filter((e) => /bmp|kidney/i.test(e.label)),
-      ]).slice(0, 8),
-      context: [...barriers, ...symptoms.filter((e) => /fatigue|swelling/i.test(e.label))],
-    },
-    primary_care: {
-      summary: `${patientName} receives fragmented care across primary care, urgent care, cardiology, and nephrology. Key trends: rising A1c, falling eGFR, elevated potassium, high BP, new volume-related symptoms, daily NSAID use, missed nephrology visit, and lisinopril refill delay. Intake highlights cross-specialty coordination gaps before upcoming cardiology and overdue nephrology follow-up.`,
-      concerns: [
-        "Multi-morbidity coordination: diabetes, HTN, CKD with conflicting medication exposures",
-        "Care gap: missed nephrology and delayed pharmacy refill",
-        "Repeat BMP ordered — ensure closed-loop follow-up",
-        "Urgent care NSAID recommendation may conflict with CKD management",
-        ...(relevantAlerts.slice(0, 2).map((a) => a.title)),
-      ],
-      questions: [
-        "Can we reconcile medications across all recent visits?",
-        "Who owns follow-up on repeat BMP results?",
-        "Can you help re-establish nephrology and address insurance barriers?",
-        "What red-flag symptoms should prompt urgent evaluation?",
-      ],
-      timeline: sortByDate(events).slice(0, 10),
-      context: [...barriers, ...symptoms],
-    },
-    endocrinology: {
-      summary: `${patientName} has type 2 diabetes with a rising HbA1c trend${a1cTrend ? ` (${a1cTrend})` : ""} on metformin. Worsening CKD may constrain future diabetes therapy choices. Recent fatigue and care-access barriers (insurance change, refill delay) may affect adherence and lifestyle management.`,
-      concerns: [
-        "HbA1c rising — diabetes control slipping",
-        "CKD progression may limit metformin and other agent options",
-        "NSAID and BP medication issues may indirectly affect metabolic management",
-        "Patient-reported fatigue and access barriers",
-      ],
-      questions: [
-        "Is metformin still appropriate at current eGFR?",
-        "Should we add or switch diabetes therapy given A1c trend?",
-        "Would CGM or structured diabetes education help now?",
-        "How should kidney and cardiac comorbidities guide glycemic targets?",
-      ],
-      timeline: sortByDate([
-        ...labsAndVitals.filter((e) => /hba1c|a1c|blood pressure/i.test(e.label)),
-        ...meds.filter((e) => /metformin/i.test(e.label)),
-        ...filterByType(events, ["condition"]).filter((e) => /diabetes/i.test(e.label)),
-      ]).slice(0, 8),
-      context: [...symptoms.filter((e) => /fatigue/i.test(e.label)), ...barriers],
-    },
-    pharmacy: {
-      summary: `${patientName}'s active medication list includes metformin, lisinopril, and newly reported daily ibuprofen (OTC plus urgent care recommendation). Lisinopril refill was delayed. Given CKD and elevated potassium, NSAID use presents a significant medication safety concern requiring reconciliation across prescribers.`,
-      concerns: [
-        "Daily ibuprofen with CKD, hyperkalemia risk, and lisinopril",
-        "Lisinopril refill delay — assess adherence and BP impact",
-        "Medication list fragmentation across urgent care, PCP, and patient report",
-        "Need for safer analgesic alternative for knee pain",
-      ],
-      questions: [
-        "Can you review all prescriptions and OTC meds for kidney and potassium risk?",
-        "What non-NSAID options are safe for my knee pain with CKD?",
-        "Should lisinopril timing or dose change given recent labs?",
-        "Can pharmacy notify my doctors if future refills are delayed?",
-      ],
-      timeline: sortByDate([
-        ...meds,
-        ...barriers.filter((e) => /refill/i.test(e.label)),
-        ...labsAndVitals.filter((e) => /potassium|egfr/i.test(e.label)),
-      ]).slice(0, 8),
-      context: [...meds.filter((e) => /ibuprofen/i.test(e.label)), ...barriers],
-    },
-  };
+  const abnormalLabs = labsAndVitals.filter((e) => {
+    const concept = groundConcept(normalizeLabel(e.label, e.type), e.type);
+    return isAbnormalConcerning(concept, interpretLabValue(concept, e.value));
+  });
 
-  const config = configs[specialty];
+  // Build a dynamic, specialty-aware patient snapshot.
+  const conditionNames = conditions.map((c) => normalizeLabel(c.label, c.type));
+  const relevantConditions = conditions
+    .filter((c) => isRelevant(groundConcept(normalizeLabel(c.label, c.type), c.type), specialty))
+    .map((c) => normalizeLabel(c.label, c.type));
+  const medNames = meds.map((m) => normalizeLabel(m.label, m.type));
+  const symptomNames = Array.from(new Set(symptoms.map((s) => normalizeLabel(s.label, s.type))));
+
+  const summaryParts: string[] = [];
+  if (conditionNames.length > 0) {
+    summaryParts.push(`${patientName} has a history of ${describeList(conditionNames)}.`);
+  } else {
+    summaryParts.push(`${patientName}'s record does not list established diagnoses yet.`);
+  }
+  if (medNames.length > 0) {
+    summaryParts.push(`Current medications include ${describeList(medNames)}.`);
+  }
+  if (worseningTrends.length > 0) {
+    summaryParts.push(
+      `Worsening trends: ${describeList(
+        worseningTrends.map((t) => `${t.label} ${t.first}→${t.last}${t.unit ? ` ${t.unit}` : ""}`)
+      )}.`
+    );
+  } else if (abnormalLabs.length > 0) {
+    summaryParts.push(
+      `Out-of-range results: ${describeList(abnormalLabs.map((l) => `${normalizeLabel(l.label, l.type)} ${l.value ?? ""}`))}.`
+    );
+  }
+  if (symptomNames.length > 0) {
+    summaryParts.push(`Reported symptoms: ${describeList(symptomNames)}.`);
+  }
+  if (barriers.length > 0) {
+    summaryParts.push(`Care barriers noted: ${describeList(barriers.map((b) => b.label))}.`);
+  }
+  if (specialty !== "primary_care" && relevantConditions.length > 0) {
+    summaryParts.push(
+      `Most relevant to ${SPECIALTY_LABELS[specialty].toLowerCase()}: ${describeList(relevantConditions)}.`
+    );
+  }
+
+  // Top concerns: alerts first, then abnormal labs and care gaps.
+  const concerns: string[] = [
+    ...relevantAlerts.map((a) => a.title),
+    ...worseningTrends.map((t) => `${t.label} trending unfavorably (${t.first}→${t.last})`),
+    ...abnormalLabs
+      .filter((l) => !worseningTrends.some((t) => t.label === normalizeLabel(l.label, l.type)))
+      .map((l) => `${normalizeLabel(l.label, l.type)} out of range (${l.value ?? ""})`),
+    ...barriers.map((b) => `Care barrier: ${b.label}`),
+  ];
+
+  // Questions: from relevant alerts, else sensible defaults.
+  const alertQuestions = relevantAlerts.flatMap((a) => a.suggestedQuestions);
+  const questions =
+    alertQuestions.length > 0
+      ? Array.from(new Set(alertQuestions)).slice(0, 5)
+      : defaultQuestions(specialty, relevantConditions);
+
+  // Timeline relevant to this specialty.
+  const relevantTimeline = sortByDate(
+    events.filter((e) => {
+      if (specialty === "primary_care") return e.type !== "note";
+      const concept = groundConcept(normalizeLabel(e.label, e.type), e.type);
+      return isRelevant(concept, specialty) || e.type === "barrier";
+    })
+  ).slice(0, 10);
 
   return {
     specialty,
     title: `${SPECIALTY_LABELS[specialty]} Visit Brief — ${patientName}`,
-    summary: config.summary,
-    topConcerns: config.concerns.slice(0, 5),
-    relevantTimeline: config.timeline,
+    summary: summaryParts.join(" "),
+    topConcerns: dedupe(concerns).slice(0, 5),
+    relevantTimeline,
     medications: meds,
-    labsAndVitals: labsAndVitals.slice(0, 10),
-    patientContext: config.context,
-    questions: config.questions,
+    labsAndVitals: labsAndVitals.slice(0, 12),
+    patientContext: [...symptoms, ...barriers, ...careTasks],
+    questions,
     evidenceSources,
   };
+}
+
+function defaultQuestions(specialty: ReportSpecialty, conditions: string[]): string[] {
+  const focus = conditions[0] ?? "my overall health";
+  return [
+    `What should I prioritize for ${focus} before the next visit?`,
+    "Are any of my medications interacting or unnecessary?",
+    "Which symptoms should prompt urgent attention?",
+    `What follow-up or tests do you recommend from a ${SPECIALTY_LABELS[specialty].toLowerCase()} perspective?`,
+  ];
+}
+
+function dedupe(items: string[]): string[] {
+  return Array.from(new Set(items.filter(Boolean)));
 }
 
 export function reportToPlainText(report: DoctorReport): string {

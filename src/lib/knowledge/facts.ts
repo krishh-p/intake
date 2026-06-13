@@ -1,7 +1,6 @@
 import type {
   CandidateFact,
   ClinicalFact,
-  Entity,
   FactRelevance,
   HealthEvent,
   ReviewItem,
@@ -9,7 +8,10 @@ import type {
   SourceChunk,
 } from "@/lib/schema";
 import { chunkSource } from "@/lib/knowledge/chunk";
-import { canonicalKey, eventTypeToNodeKind, normalizeLabel } from "@/lib/knowledge/normalize";
+import { normalizeLabel } from "@/lib/knowledge/normalize";
+import { groundConcept, interpretLabValue } from "@/lib/knowledge/ontology";
+import { resolveEntities } from "@/lib/knowledge/entityResolution";
+import { detectContradictions, withValidity } from "@/lib/knowledge/temporal";
 import { stableId } from "@/lib/utils";
 
 const GRAPH_TYPES = new Set(["condition", "symptom", "medication", "lab", "vital", "care_task", "barrier"]);
@@ -29,7 +31,8 @@ export function relevanceForEvent(event: HealthEvent): FactRelevance {
 }
 
 export function candidateFromEvent(event: HealthEvent, source?: Source): CandidateFact {
-  const normalizedLabel = normalizeLabel(event.label);
+  const normalizedLabel = normalizeLabel(event.label, event.type);
+  const grounded = groundConcept(normalizedLabel, event.type);
   const evidenceQuote =
     typeof event.value === "string" && event.value.length > 12
       ? event.value
@@ -43,7 +46,7 @@ export function candidateFromEvent(event: HealthEvent, source?: Source): Candida
     label: event.label,
     normalizedLabel,
     value: event.value,
-    unit: event.unit,
+    unit: event.unit ?? grounded.unit,
     observedAt: event.observedAt,
     status: event.status,
     relevance: relevanceForEvent(event),
@@ -51,6 +54,8 @@ export function candidateFromEvent(event: HealthEvent, source?: Source): Candida
     evidenceQuote,
     uncertain: Boolean(event.metadata?.uncertain),
     negated: Boolean(event.metadata?.negated),
+    coding: grounded.coding,
+    labFlag: grounded.kind === "lab" ? interpretLabValue(grounded, event.value) : undefined,
     metadata: event.metadata,
   };
 }
@@ -172,6 +177,7 @@ export function buildKnowledgeFromEvents(sources: Source[], events: HealthEvent[
   const clinicalFacts: ClinicalFact[] = [];
   const reviewItems: ReviewItem[] = [];
   const factFingerprint = new Set<string>();
+  const recordedAt = new Date().toISOString();
 
   for (let i = 0; i < candidateFacts.length; i++) {
     const candidate = candidateFacts[i];
@@ -187,40 +193,10 @@ export function buildKnowledgeFromEvents(sources: Source[], events: HealthEvent[
     const fingerprint = `${accepted.fact.sourceId}:${accepted.fact.kind}:${accepted.fact.normalizedLabel}:${accepted.fact.observedAt}:${String(accepted.fact.value ?? "")}`;
     if (factFingerprint.has(fingerprint)) continue;
     factFingerprint.add(fingerprint);
-    clinicalFacts.push(accepted.fact);
+    clinicalFacts.push(withValidity(accepted.fact, recordedAt));
   }
 
-  const entities = buildEntities(clinicalFacts);
+  const entities = resolveEntities(clinicalFacts);
+  reviewItems.push(...detectContradictions(clinicalFacts));
   return { sourceChunks, candidateFacts, clinicalFacts, entities, reviewItems };
-}
-
-export function buildEntities(facts: ClinicalFact[]): Entity[] {
-  const grouped = new Map<string, ClinicalFact[]>();
-  for (const fact of facts) {
-    if (fact.relevance !== "graph") continue;
-    const key = canonicalKey(fact.kind, fact.normalizedLabel);
-    grouped.set(key, [...(grouped.get(key) ?? []), fact]);
-  }
-
-  return Array.from(grouped.entries()).map(([key, group]) => {
-    const first = group[0];
-    const aliases = Array.from(new Set(group.map((fact) => fact.label).filter(Boolean)));
-    const id = stableId("entity", `${first.patientId}:${key}`);
-    return {
-      id,
-      patientId: first.patientId,
-      kind: eventTypeToNodeKind(first.kind),
-      canonicalLabel: first.normalizedLabel,
-      aliases,
-      confidence: Math.min(...group.map((fact) => fact.confidence)),
-      reviewStatus: group.some((fact) => fact.reviewStatus === "needs_review")
-        ? "needs_review"
-        : "accepted",
-      factIds: group.map((fact) => fact.id),
-      metadata: {
-        eventIds: group.map((fact) => fact.eventId),
-        sourceIds: Array.from(new Set(group.map((fact) => fact.sourceId))),
-      },
-    };
-  });
 }

@@ -11,15 +11,11 @@ export default function SharedReportPage() {
   const params = useParams();
   const token = typeof params.token === "string" ? params.token : "";
   const [shared, setShared] = useState<SharedReport | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(token !== "");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!token) {
-      setLoading(false);
-      setError("Invalid link");
-      return;
-    }
+    if (!token) return;
 
     let active = true;
     getSharedReport(token)
@@ -52,12 +48,13 @@ export default function SharedReportPage() {
     );
   }
 
-  if (error || !shared) {
+  const effectiveError = error ?? (!token ? "Invalid link" : null);
+  if (effectiveError || !shared) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-paper px-6">
         <div className="max-w-md text-center">
           <h1 className="font-display text-xl text-ink">Report unavailable</h1>
-          <p className="mt-2 text-sm text-ink-muted">{error ?? "Not found"}</p>
+          <p className="mt-2 text-sm text-ink-muted">{effectiveError ?? "Not found"}</p>
         </div>
       </div>
     );

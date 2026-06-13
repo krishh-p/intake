@@ -28,6 +28,7 @@ import { generateId, stableId } from "@/lib/utils";
 import { generateReport } from "@/lib/reports/generateReport";
 import { acceptCandidate, healthEventFromFact } from "@/lib/knowledge/facts";
 import { normalizeLabel } from "@/lib/knowledge/normalize";
+import { isRelationValid } from "@/lib/knowledge/graphSchema";
 
 type ExtractedCandidateFact = {
   kind: string;
@@ -194,6 +195,10 @@ export async function aiExtractRelationships(
     const toNode = findNodeByLabel(nodes, rel.toLabel);
     if (!fromNode || !toNode || fromNode.id === toNode.id) continue;
 
+    // Schema-guided validation: discard triples whose endpoints violate the
+    // relation's domain/range (post-hoc type checking).
+    if (!isRelationValid(fromNode.kind, rel.relation as GraphEdgeRelation, toNode.kind)) continue;
+
     const evidenceEventIds = collectEventIds(fromNode, toNode, events, rel.fromLabel, rel.toLabel);
 
     edges.push({
@@ -202,6 +207,9 @@ export async function aiExtractRelationships(
       to: toNode.id,
       relation: rel.relation as GraphEdgeRelation,
       evidenceEventIds,
+      confidence: 0.7,
+      reviewStatus: "needs_review",
+      metadata: { source: "ai", rationale: rel.reason },
     });
   }
 

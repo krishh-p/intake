@@ -18,7 +18,10 @@ import {
   doctorNoteToText,
   extractFromText,
   finalizeIntakeConversation,
+  indexWorkspaceEmbeddings,
+  searchEvidenceSemantic,
 } from "@/lib/api/client";
+import { fuseEvidence, type SemanticHit } from "@/lib/index/semanticIndex";
 import { parseEmrFile } from "@/lib/ingest/emrParser";
 import { type DoctorNoteInput } from "@/lib/ingest/doctorNoteParser";
 import { buildGraphFromKnowledge } from "@/lib/graph/buildGraph";
@@ -232,9 +235,14 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
       entities: knowledge.entities,
       graphRelationships: relationshipResult.relationships,
       reviewItems: knowledgeReviewItems,
-    }).catch((err) => {
-      setError(err instanceof Error ? err.message : "Supabase sync failed");
-    });
+    })
+      .then(() => {
+        // Generate embeddings for the freshly-synced rows, off the hot path.
+        void indexWorkspaceEmbeddings();
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : "Supabase sync failed");
+      });
   }, [
     hydrated,
     user,
@@ -244,6 +252,17 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
     relationshipResult.relationships,
     knowledgeReviewItems,
   ]);
+
+  // One-shot backfill: embed any existing rows that predate this feature so
+  // semantic search works on first login without waiting for a new write.
+  const backfilledRef = useRef(false);
+  useEffect(() => {
+    if (backfilledRef.current) return;
+    if (!hydrated || !user || !isSupabaseConfigured()) return;
+    if (events.length === 0) return;
+    backfilledRef.current = true;
+    void indexWorkspaceEmbeddings();
+  }, [hydrated, user, events]);
 
   const reanalyze = useCallback(
     async (
@@ -474,10 +493,94 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const selectedAlert = alerts.find((a) => a.id === selectedAlertId);
-  const evidenceForAlert = useMemo(() => {
+
+  // Lexical (BM25) evidence — always available, synchronous, zero-dependency.
+  const lexicalEvidence = useMemo(() => {
     if (!selectedAlert) return [];
     return searchEvidenceForAlert(evidenceIndex, selectedAlert);
   }, [selectedAlert, evidenceIndex]);
+
+  // Semantic layer: query embedding + cosine-kNN run server-side in a Supabase
+  // Edge Function (gte-small + pgvector), then fused with the lexical results
+  // via RRF. The DB returns matches as fact/chunk references, which we map back
+  // onto the in-memory evidence documents so RRF fuses on shared ids. Degrades
+  // gracefully to lexical-only whenever the edge/model is unavailable.
+  const semanticDisabledRef = useRef(false);
+  // Fused (hybrid) results live in state and are stamped with the alert id +
+  // evidence-index identity they were computed against, so a stale fetch never
+  // leaks into a different alert or a rebuilt index.
+  const [hybridEvidence, setHybridEvidence] = useState<{
+    alertId: string;
+    index: EvidenceIndex;
+    results: SearchResult[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (!selectedAlert) return;
+    if (!isSupabaseConfigured() || semanticDisabledRef.current) return;
+    if (
+      hybridEvidence &&
+      hybridEvidence.alertId === selectedAlert.id &&
+      hybridEvidence.index === evidenceIndex
+    ) {
+      return; // already have fresh fused results for this alert + index
+    }
+
+    let cancelled = false;
+    const alert = selectedAlert;
+    (async () => {
+      const query = [
+        alert.title,
+        alert.explanation,
+        ...alert.suggestedQuestions,
+      ].join(" ");
+      const rows = await searchEvidenceSemantic(query, 12);
+      if (cancelled) return;
+      if (!rows) {
+        semanticDisabledRef.current = true; // edge/model unavailable — stay lexical
+        return;
+      }
+
+      // Map DB rows (fact event_id / chunk source_id) to client evidence docs.
+      const docs = evidenceIndex.getAllDocuments();
+      const byEvent = new Map<string, (typeof docs)[number]>();
+      const bySource = new Map<string, (typeof docs)[number]>();
+      for (const d of docs) {
+        if (d.eventId) byEvent.set(d.eventId, d);
+        if (d.id.startsWith("doc_src") && !bySource.has(d.sourceId)) {
+          bySource.set(d.sourceId, d);
+        }
+      }
+      const semanticHits: SemanticHit[] = [];
+      for (const r of rows) {
+        const doc =
+          r.ref_type === "fact" ? byEvent.get(r.ref_id) : bySource.get(r.source_id);
+        if (doc) semanticHits.push({ id: doc.id, score: r.score, document: doc });
+      }
+
+      const fused = fuseEvidence(lexicalEvidence, semanticHits, 8);
+      if (cancelled) return;
+      setHybridEvidence({ alertId: alert.id, index: evidenceIndex, results: fused });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedAlert, lexicalEvidence, evidenceIndex, hybridEvidence]);
+
+  // Prefer fused (hybrid) results for the current alert when available for the
+  // current evidence index; otherwise fall back to lexical. Synchronous and
+  // dependency-free, with semantics as a progressive enhancement.
+  const evidenceForAlert = useMemo<SearchResult[]>(() => {
+    if (!selectedAlert) return [];
+    if (
+      hybridEvidence &&
+      hybridEvidence.alertId === selectedAlert.id &&
+      hybridEvidence.index === evidenceIndex
+    ) {
+      return hybridEvidence.results;
+    }
+    return lexicalEvidence;
+  }, [selectedAlert, hybridEvidence, lexicalEvidence, evidenceIndex]);
 
   const displayGraph = useMemo(() => {
     if (graph.nodes.length === 0) {

@@ -5,7 +5,7 @@ import { useIntake } from "@/lib/IntakeContext";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { ProcessingIndicator } from "@/components/ui/ProcessingIndicator";
-import { generateAiReport, buildReportFromIntake } from "@/lib/api/client";
+import { generateAiReport } from "@/lib/api/client";
 import { generateReport, reportToPlainText } from "@/lib/reports/generateReport";
 import { ReportArticle } from "@/components/reports/ReportArticle";
 import type { DoctorReport, ReportSpecialty } from "@/lib/schema";

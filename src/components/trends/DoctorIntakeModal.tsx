@@ -51,6 +51,7 @@ export function DoctorIntakeModal({
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const sessionRef = useRef<GrokVoiceSession | null>(null);
   const messagesRef = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
@@ -76,6 +77,7 @@ export function DoctorIntakeModal({
     }
 
     savingRef.current = true;
+    setSaving(true);
     setPhase("building");
     setError(null);
 
@@ -107,6 +109,7 @@ export function DoctorIntakeModal({
       setPhase("voice");
     } finally {
       savingRef.current = false;
+      setSaving(false);
     }
   }, [user, specialty, state.events, state.sources, alerts]);
 
@@ -203,7 +206,7 @@ export function DoctorIntakeModal({
                   <Button
                     variant="danger"
                     onClick={() => void finalizeSession()}
-                    disabled={savingRef.current}
+                    disabled={saving}
                   >
                     End intake
                   </Button>
