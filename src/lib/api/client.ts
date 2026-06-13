@@ -136,6 +136,27 @@ export async function generateAiReport(
   return res.json();
 }
 
+export async function buildReportFromIntake(input: {
+  specialty: ReportSpecialty;
+  patientName: string;
+  patientId: string;
+  messages: IntakeChatMessage[];
+  events: HealthEvent[];
+  sources: Source[];
+  alerts: RiskAlert[];
+}): Promise<{ report: DoctorReport; method: string }> {
+  const res = await fetch("/api/reports/from-intake", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.error ?? "Report from intake failed");
+  }
+  return res.json();
+}
+
 export async function runTrendAgent(
   patientName: string,
   events: HealthEvent[],

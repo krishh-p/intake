@@ -204,6 +204,8 @@ export type Trend = {
   window?: { start: string; end: string };
   dataPoints?: { observedAt: string; value: number; unit?: string }[];
   evidenceEventIds: string[];
+  recommendedSpecialty?: ReportSpecialty;
+  recommendationReason?: string;
 };
 
 export type TrendReport = {
@@ -235,6 +237,16 @@ export type DoctorReport = {
   patientContext: HealthEvent[];
   questions: string[];
   evidenceSources: Source[];
+  intakeSummary?: string;
+  intakeTranscript?: string;
+};
+
+export type SharedReport = {
+  token: string;
+  patientName: string;
+  specialty: ReportSpecialty;
+  report: DoctorReport;
+  createdAt: string;
 };
 
 export type PatientProfile = {

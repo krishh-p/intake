@@ -2,6 +2,16 @@ import { runTrendAgent } from "@/lib/agent/trendAgent";
 import { isAiConfigured } from "@/lib/ai/xai";
 import type { HealthEvent, Source } from "@/lib/schema";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
+const SSE_HEADERS = {
+  "Content-Type": "text/event-stream",
+  "Cache-Control": "no-cache, no-transform",
+  Connection: "keep-alive",
+  "X-Accel-Buffering": "no",
+};
+
 function sseLine(payload: unknown) {
   return `data: ${JSON.stringify(payload)}\n\n`;
 }
@@ -10,14 +20,7 @@ export async function POST(request: Request) {
   if (!isAiConfigured()) {
     return new Response(
       sseLine({ type: "error", error: "XAI_API_KEY is not configured" }),
-      {
-        status: 503,
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
-        },
-      }
+      { status: 503, headers: SSE_HEADERS }
     );
   }
 
@@ -32,11 +35,7 @@ export async function POST(request: Request) {
   } catch {
     return new Response(sseLine({ type: "error", error: "Invalid JSON body" }), {
       status: 400,
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
+      headers: SSE_HEADERS,
     });
   }
 
@@ -45,14 +44,7 @@ export async function POST(request: Request) {
   if (!patientName?.trim() || !events?.length) {
     return new Response(
       sseLine({ type: "error", error: "patientName and events are required" }),
-      {
-        status: 400,
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          Connection: "keep-alive",
-        },
-      }
+      { status: 400, headers: SSE_HEADERS }
     );
   }
 
@@ -62,6 +54,8 @@ export async function POST(request: Request) {
       const send = (payload: unknown) => {
         controller.enqueue(encoder.encode(sseLine(payload)));
       };
+
+      send({ type: "started" });
 
       try {
         const report = await runTrendAgent({
@@ -84,11 +78,5 @@ export async function POST(request: Request) {
     },
   });
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  });
+  return new Response(stream, { headers: SSE_HEADERS });
 }

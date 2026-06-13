@@ -204,6 +204,23 @@ const TOOL_SCHEMAS: GrokToolDef[] = [
                   items: { type: "string" },
                   description: "MUST be event IDs returned by other tools",
                 },
+                recommendedSpecialty: {
+                  type: "string",
+                  enum: [
+                    "primary_care",
+                    "cardiology",
+                    "nephrology",
+                    "endocrinology",
+                    "pharmacy",
+                  ],
+                  description:
+                    "Specialist to consult when this trend warrants follow-up. Omit if no specialist needed.",
+                },
+                recommendationReason: {
+                  type: "string",
+                  description:
+                    "One-line reason to consult that specialist. Required when recommendedSpecialty is set.",
+                },
               },
               required: [
                 "metric",

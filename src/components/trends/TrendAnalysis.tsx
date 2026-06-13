@@ -3,10 +3,19 @@
 import { useCallback, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { DoctorIntakeModal } from "@/components/trends/DoctorIntakeModal";
 import { runTrendAgent } from "@/lib/api/client";
 import { useIntake } from "@/lib/IntakeContext";
-import type { AgentStep, Trend, TrendReport } from "@/lib/schema";
+import type { AgentStep, ReportSpecialty, Trend, TrendReport } from "@/lib/schema";
 import { cn, sourceTypeLabel } from "@/lib/utils";
+
+const SPECIALTY_DISPLAY: Record<ReportSpecialty, string> = {
+  primary_care: "Primary care",
+  cardiology: "Cardiology",
+  nephrology: "Nephrology",
+  endocrinology: "Endocrinology",
+  pharmacy: "Pharmacy",
+};
 
 const SEVERITY = {
   high: { dot: "bg-alert-high", label: "High" },
@@ -29,6 +38,8 @@ const TOOL_LABELS: Record<string, string> = {
   get_risk_alerts: "Checking risk alerts",
   get_current_date: "Getting current date",
   submit_trend_report: "Submitting trend report",
+  web_search: "Searching the web",
+  agent_turn: "Reasoning",
 };
 
 function formatStepArgs(tool: string, args: unknown) {
@@ -40,6 +51,12 @@ function formatStepArgs(tool: string, args: unknown) {
   if (tool === "search_evidence" && a.query) {
     return ` — "${String(a.query)}"`;
   }
+  if (tool === "web_search" && a.query) {
+    return ` — "${String(a.query)}"`;
+  }
+  if (tool === "agent_turn" && a.turn) {
+    return ` — turn ${String(a.turn)}`;
+  }
   if (tool === "query_events" && a.labelPattern) {
     return ` — /${String(a.labelPattern)}/`;
   }
@@ -49,9 +66,11 @@ function formatStepArgs(tool: string, args: unknown) {
 function TrendCard({
   trend,
   evidenceLabels,
+  onStartIntake,
 }: {
   trend: Trend;
   evidenceLabels: { id: string; label: string; type: string; sourceType: string }[];
+  onStartIntake: (specialty: ReportSpecialty, focus: { metric: string; changeSummary: string }) => void;
 }) {
   const sev = SEVERITY[trend.severity];
   const dir = DIRECTION[trend.direction];
@@ -93,6 +112,33 @@ function TrendCard({
         </div>
       )}
 
+      {trend.recommendedSpecialty && (
+        <div className="mt-4 border border-accent/30 bg-accent-soft/20 px-4 py-3">
+          <p className="text-xs font-medium uppercase tracking-wider text-ink-faint">
+            Specialist recommendation
+          </p>
+          <p className="mt-2 text-sm text-ink-muted">
+            Consider a{" "}
+            <span className="font-medium text-ink">
+              {SPECIALTY_DISPLAY[trend.recommendedSpecialty]}
+            </span>{" "}
+            review
+            {trend.recommendationReason ? ` — ${trend.recommendationReason}` : ""}
+          </p>
+          <Button
+            className="mt-3"
+            onClick={() =>
+              onStartIntake(trend.recommendedSpecialty!, {
+                metric: trend.metric,
+                changeSummary: trend.changeSummary,
+              })
+            }
+          >
+            Start {SPECIALTY_DISPLAY[trend.recommendedSpecialty]} intake
+          </Button>
+        </div>
+      )}
+
       {evidenceLabels.length > 0 && (
         <div className="mt-4 border border-line bg-paper px-4 py-3">
           <p className="text-xs font-medium uppercase tracking-wider text-ink-faint">
@@ -122,6 +168,10 @@ export function TrendAnalysis() {
   const [steps, setSteps] = useState<AgentStep[]>([]);
   const [report, setReport] = useState<TrendReport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [intakeModal, setIntakeModal] = useState<{
+    specialty: ReportSpecialty;
+    focus: { metric: string; changeSummary: string };
+  } | null>(null);
 
   const sourceTypeById = useMemo(() => {
     const map = new Map<string, string>();
@@ -240,9 +290,18 @@ export function TrendAnalysis() {
               key={trend.id}
               trend={trend}
               evidenceLabels={evidenceForTrend(trend)}
+              onStartIntake={(specialty, focus) => setIntakeModal({ specialty, focus })}
             />
           ))}
         </div>
+      )}
+
+      {intakeModal && (
+        <DoctorIntakeModal
+          specialty={intakeModal.specialty}
+          focus={intakeModal.focus}
+          onClose={() => setIntakeModal(null)}
+        />
       )}
 
       {!report && !running && steps.length === 0 && (

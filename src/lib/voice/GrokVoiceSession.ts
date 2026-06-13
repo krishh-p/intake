@@ -1,4 +1,5 @@
 import type { IntakeChatMessage } from "@/lib/ai/intakeAgent";
+import type { ReportSpecialty } from "@/lib/schema";
 import { base64PCM16ToFloat32, float32ToPCM16Base64 } from "@/lib/voice/audio";
 import { INTAKE_TURN_DETECTION } from "@/lib/voice/intakeVoiceInstructions";
 
@@ -15,6 +16,9 @@ export type VoiceSessionStatus =
 
 type VoiceSessionConfig = {
   patientName: string;
+  mode?: "intake" | "doctor";
+  specialty?: ReportSpecialty;
+  focus?: { metric?: string; changeSummary?: string };
   onStatus: (status: VoiceSessionStatus) => void;
   onMessages: (messages: IntakeChatMessage[]) => void;
   onError: (message: string) => void;
@@ -91,7 +95,12 @@ export class GrokVoiceSession {
     const res = await fetch("/api/intake/voice/session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ patientName: this.config.patientName }),
+      body: JSON.stringify({
+        patientName: this.config.patientName,
+        mode: this.config.mode ?? "intake",
+        specialty: this.config.specialty,
+        focus: this.config.focus,
+      }),
     });
 
     if (!res.ok) {

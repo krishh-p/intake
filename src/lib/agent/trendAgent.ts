@@ -1,12 +1,14 @@
 import { buildTrendTools } from "@/lib/agent/tools";
 import {
-  grokChatWithTools,
-  type GrokToolMessage,
+  grokResponsesCreate,
+  isServerSideToolOutput,
+  toResponsesTools,
 } from "@/lib/ai/xai";
 import { buildEvidenceIndex } from "@/lib/index/evidenceIndex";
 import type {
   AgentStep,
   HealthEvent,
+  ReportSpecialty,
   Source,
   Trend,
   TrendReport,
@@ -20,11 +22,22 @@ Hard rules:
 - NEVER invent numbers. Get every value, slope, and percentage from compute_trend or get_metric_series.
 - Investigate before concluding: call list_metrics first, then compute_trend on clinically meaningful metrics.
 - Use search_evidence and get_risk_alerts to ground narratives and actions in the patient's own records.
+- Use web_search for clinical context when helpful: reference ranges, guideline thresholds, what worsening trends typically mean, and evidence-based action suggestions. Prefer trusted medical sources (e.g. NIH, ADA, KDIGO, AHA).
+- You may cite web sources in narratives, but evidenceEventIds must come from patient data tools only.
 - Every trend in submit_trend_report MUST include evidenceEventIds drawn from tool results only.
 - Prioritize clinically meaningful movement (labs/vitals worsening, control slipping, new symptoms).
 - For direction: worsening = clinically bad trend (e.g. rising HbA1c, falling eGFR); improving = clinically good; stable = no meaningful change.
 - Max 6 trends. Skip metrics with insufficient data.
+- When a worsening or clinically meaningful trend warrants specialist attention, set recommendedSpecialty (primary_care, cardiology, nephrology, endocrinology, or pharmacy) and a one-line recommendationReason.
 - Finish by calling submit_trend_report exactly once with your final analysis.`;
+
+const VALID_SPECIALTIES = new Set([
+  "primary_care",
+  "cardiology",
+  "nephrology",
+  "endocrinology",
+  "pharmacy",
+]);
 
 type RawTrendInput = {
   metric?: string;
@@ -34,7 +47,54 @@ type RawTrendInput = {
   narrative?: string;
   suggestedActions?: string[];
   evidenceEventIds?: string[];
+  recommendedSpecialty?: string;
+  recommendationReason?: string;
 };
+
+function parseToolArgs(raw?: string): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function buildTrendReport(
+  rawTrends: RawTrendInput[],
+  validIds: Set<string>
+): TrendReport {
+  const trends: Trend[] = rawTrends
+    .map((t) => {
+      const specialty =
+        t.recommendedSpecialty && VALID_SPECIALTIES.has(t.recommendedSpecialty)
+          ? (t.recommendedSpecialty as ReportSpecialty)
+          : undefined;
+      return {
+        id: generateId("trend"),
+        metric: t.metric ?? "Unknown",
+        direction: t.direction ?? "stable",
+        severity: t.severity ?? "low",
+        changeSummary: t.changeSummary ?? "",
+        narrative: t.narrative ?? "",
+        suggestedActions: t.suggestedActions ?? [],
+        evidenceEventIds: (t.evidenceEventIds ?? []).filter((id) =>
+          validIds.has(id)
+        ),
+        recommendedSpecialty: specialty,
+        recommendationReason: specialty
+          ? t.recommendationReason?.trim()
+          : undefined,
+      };
+    })
+    .filter((t) => t.evidenceEventIds.length > 0);
+
+  return {
+    trends,
+    generatedAt: new Date().toISOString(),
+    method: "agent",
+  };
+}
 
 export async function runTrendAgent(input: {
   patientName: string;
@@ -49,75 +109,120 @@ export async function runTrendAgent(input: {
     index
   );
   const validIds = new Set(input.events.map((e) => e.id));
+  const tools = toResponsesTools(schemas, { webSearch: true });
 
-  const messages: GrokToolMessage[] = [
-    { role: "system", content: TREND_AGENT_SYSTEM },
+  const initialInput = [
+    { role: "system" as const, content: TREND_AGENT_SYSTEM },
     {
-      role: "user",
+      role: "user" as const,
       content: `Patient: ${input.patientName}. Analyze trends across ${input.events.length} health events and ${input.sources.length} sources. Today is ${new Date().toISOString()}.`,
     },
   ];
 
   const maxSteps = 8;
+  let previousResponseId: string | undefined;
+  let nextInput: typeof initialInput | Array<{
+    type: "function_call_output";
+    call_id: string;
+    output: string;
+  }> = initialInput;
+  const emittedSteps = new Set<string>();
+
+  const emitStep = (tool: string, args: Record<string, unknown>, key: string) => {
+    if (emittedSteps.has(key)) return;
+    emittedSteps.add(key);
+    input.onStep?.({ tool, args });
+  };
 
   for (let step = 0; step < maxSteps; step++) {
-    const msg = await grokChatWithTools(messages, schemas, {
-      toolChoice: step === maxSteps - 1 ? "required" : "auto",
-    });
-    messages.push(msg);
+    emitStep("agent_turn", { turn: step + 1 }, `turn-${step + 1}`);
 
-    if (!msg.tool_calls?.length) {
+    const response = await grokResponsesCreate(nextInput, tools, {
+      previousResponseId,
+      maxTurns: 6,
+      onStreamEvent: (event) => {
+        if (event.type === "response.output_item.added" && event.item) {
+          const item = event.item;
+          if (item.type === "web_search_call") {
+            emitStep(
+              "web_search",
+              { query: item.action?.query ?? item.arguments },
+              `ws-${item.id ?? item.call_id ?? JSON.stringify(item)}`
+            );
+          } else if (item.type === "function_call" && item.name) {
+            emitStep(
+              item.name,
+              parseToolArgs(item.arguments),
+              `fn-pending-${item.call_id ?? item.id ?? item.name}`
+            );
+          }
+        }
+
+        if (
+          event.type === "response.function_call_arguments.done" &&
+          event.name
+        ) {
+          emitStep(
+            event.name,
+            parseToolArgs(event.arguments),
+            `fn-${event.call_id ?? event.name}-${event.arguments ?? ""}`
+          );
+        }
+      },
+    });
+    previousResponseId = response.id;
+
+    for (const item of response.output) {
+      if (isServerSideToolOutput(item)) {
+        const toolName = item.name ?? item.type.replace(/_call$/, "");
+        emitStep(
+          toolName,
+          parseToolArgs(item.arguments),
+          `srv-${item.call_id ?? toolName}-${item.arguments ?? ""}`
+        );
+      }
+    }
+
+    const functionCalls = response.output.filter(
+      (item) => item.type === "function_call"
+    );
+    if (!functionCalls.length) {
       break;
     }
 
-    for (const call of msg.tool_calls) {
-      let args: Record<string, unknown> = {};
-      try {
-        args = JSON.parse(call.function.arguments || "{}") as Record<
-          string,
-          unknown
-        >;
-      } catch {
-        args = {};
-      }
+    const toolOutputs: Array<{
+      type: "function_call_output";
+      call_id: string;
+      output: string;
+    }> = [];
 
-      input.onStep?.({ tool: call.function.name, args });
+    for (const call of functionCalls) {
+      const name = call.name ?? "";
+      const args = parseToolArgs(call.arguments);
+      emitStep(
+        name,
+        args,
+        `fn-${call.call_id ?? name}-${call.arguments ?? ""}`
+      );
 
-      if (call.function.name === "submit_trend_report") {
+      if (name === "submit_trend_report") {
         const rawTrends = (args.trends as RawTrendInput[] | undefined) ?? [];
-        const trends: Trend[] = rawTrends
-          .map((t) => ({
-            id: generateId("trend"),
-            metric: t.metric ?? "Unknown",
-            direction: t.direction ?? "stable",
-            severity: t.severity ?? "low",
-            changeSummary: t.changeSummary ?? "",
-            narrative: t.narrative ?? "",
-            suggestedActions: t.suggestedActions ?? [],
-            evidenceEventIds: (t.evidenceEventIds ?? []).filter((id) =>
-              validIds.has(id)
-            ),
-          }))
-          .filter((t) => t.evidenceEventIds.length > 0);
-
-        return {
-          trends,
-          generatedAt: new Date().toISOString(),
-          method: "agent",
-        };
+        return buildTrendReport(rawTrends, validIds);
       }
 
-      const executor = executors[call.function.name];
+      const executor = executors[name];
       const result = executor
         ? executor(args)
-        : { error: `Unknown tool: ${call.function.name}` };
+        : { error: `Unknown tool: ${name}` };
 
-      messages.push({
-        role: "tool",
-        tool_call_id: call.id,
-        content: JSON.stringify(result),
+      toolOutputs.push({
+        type: "function_call_output",
+        call_id: call.call_id ?? "",
+        output: JSON.stringify(result),
       });
     }
+
+    nextInput = toolOutputs;
   }
 
   return {
