@@ -1,0 +1,71 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e5]:
+    - complementary [ref=e6]:
+      - generic [ref=e7]:
+        - link "Intake" [ref=e8] [cursor=pointer]:
+          - /url: /
+        - paragraph [ref=e9]: Health workspace
+      - navigation [ref=e10]:
+        - link "Overview" [ref=e11] [cursor=pointer]:
+          - /url: /
+          - img [ref=e12]
+          - text: Overview
+        - link "Import" [ref=e14] [cursor=pointer]:
+          - /url: /import
+          - img [ref=e15]
+          - text: Import
+        - link "Timeline" [ref=e17] [cursor=pointer]:
+          - /url: /timeline
+          - img [ref=e18]
+          - text: Timeline
+        - link "Knowledge graph" [ref=e20] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e21]
+          - text: Knowledge graph
+        - link "Insights 2" [ref=e69] [cursor=pointer]:
+          - /url: /insights
+          - img [ref=e24]
+          - text: Insights
+          - generic [ref=e70]: "2"
+        - link "Reports" [ref=e26] [cursor=pointer]:
+          - /url: /reports
+          - img [ref=e27]
+          - text: Reports
+      - generic [ref=e29]:
+        - generic [ref=e30]:
+          - paragraph [ref=e31]: E2E Test User
+          - paragraph [ref=e32]: Age 36 · 8 events
+          - paragraph [ref=e33]: e2e-intake-20260613@test.local
+        - button "Sign out" [ref=e34]
+    - main [ref=e36]:
+      - generic [ref=e37]:
+        - link "Back to import" [ref=e38] [cursor=pointer]:
+          - /url: /import
+        - generic [ref=e40]:
+          - heading "Clinician note" [level=1] [ref=e41]
+          - paragraph [ref=e42]: Enter documentation from a recent visit including follow-up tasks and lab results.
+        - generic [ref=e44]:
+          - generic [ref=e45]:
+            - generic [ref=e46]:
+              - generic [ref=e47]: Clinician name
+              - textbox "Clinician name" [ref=e48]
+            - generic [ref=e49]:
+              - generic [ref=e50]: Specialty
+              - textbox "Specialty" [ref=e51]:
+                - /placeholder: Primary care, cardiology, etc.
+          - generic [ref=e52]:
+            - generic [ref=e53]: Clinical note
+            - textbox "Clinical note" [ref=e54]:
+              - /placeholder: Enter the clinician's notes from your visit...
+          - generic [ref=e55]:
+            - generic [ref=e56]: Follow-up task
+            - textbox "Follow-up task" [ref=e57]
+          - generic [ref=e58]:
+            - generic [ref=e59]:
+              - generic [ref=e60]: Labs (optional)
+              - textbox "Labs (optional)" [ref=e61]
+            - generic [ref=e62]:
+              - generic [ref=e63]: Medication change (optional)
+              - textbox "Medication change (optional)" [ref=e64]
+          - button "Submit note" [ref=e71]

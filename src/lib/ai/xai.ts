@@ -1,11 +1,40 @@
 const XAI_BASE = "https://api.x.ai/v1";
+const DEFAULT_TEXT_MODEL = "grok-3-fast";
+const DEFAULT_VOICE_MODEL = "grok-voice-latest";
+const DEFAULT_VOICE = "ara";
 
 export function isAiConfigured(): boolean {
   return Boolean(process.env.XAI_API_KEY);
 }
 
+/** Text/chat completions model — extraction, intake chat, reports, risk. */
 export function getXaiModel(): string {
-  return process.env.XAI_MODEL ?? "grok-3-fast";
+  const configured = process.env.XAI_MODEL?.trim();
+  if (!configured) return DEFAULT_TEXT_MODEL;
+  if (/voice|realtime/i.test(configured)) {
+    console.warn(
+      `XAI_MODEL "${configured}" is a voice/realtime model; using ${DEFAULT_TEXT_MODEL} for text APIs. Set XAI_VOICE_MODEL for voice intake instead.`
+    );
+    return DEFAULT_TEXT_MODEL;
+  }
+  return configured;
+}
+
+/** Realtime voice model — /import/voice only. Never used for text/chat APIs. */
+export function getXaiVoiceModel(): string {
+  const configured = process.env.XAI_VOICE_MODEL?.trim();
+  if (!configured) return DEFAULT_VOICE_MODEL;
+  if (!/voice|realtime/i.test(configured)) {
+    console.warn(
+      `XAI_VOICE_MODEL "${configured}" does not look like a voice/realtime model.`
+    );
+  }
+  return configured;
+}
+
+/** Voice persona for realtime sessions (e.g. ara). */
+export function getXaiVoice(): string {
+  return process.env.XAI_VOICE?.trim() || DEFAULT_VOICE;
 }
 
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };

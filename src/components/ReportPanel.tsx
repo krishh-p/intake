@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useIntake } from "@/lib/IntakeContext";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/Button";
+import { ProcessingIndicator } from "@/components/ui/ProcessingIndicator";
 import { generateAiReport } from "@/lib/api/client";
 import { generateReport, reportToPlainText } from "@/lib/reports/generateReport";
 import type { DoctorReport, ReportSpecialty } from "@/lib/schema";
@@ -117,8 +118,8 @@ export function ReportPanel({ variant = "full" }: { variant?: "compact" | "full"
         className={cn("panel", variant === "full" ? "p-8 sm:p-10" : "p-6")}
       >
         {loading && !report ? (
-          <div className="flex flex-col items-center gap-3 py-16">
-            <span className="h-5 w-5 animate-spin rounded-full border-2 border-line border-t-accent" />
+          <div className="flex flex-col items-center gap-4 py-16">
+            <ProcessingIndicator size="md" label="Generating report" />
             <p className="text-sm text-ink-muted">Generating report...</p>
           </div>
         ) : report ? (

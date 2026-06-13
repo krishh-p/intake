@@ -5,6 +5,7 @@ import { useIntake } from "@/lib/IntakeContext";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
 import { FieldLabel, Input, Textarea } from "@/components/ui/Input";
+import { ProcessingIndicator } from "@/components/ui/ProcessingIndicator";
 import { EMPTY_DOCTOR_NOTE } from "@/lib/schema";
 
 export function ClinicianImportForm() {
@@ -15,7 +16,9 @@ export function ClinicianImportForm() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     clearError();
-    await submitDoctorNote(form);
+    setSuccess(false);
+    const ok = await submitDoctorNote(form);
+    if (!ok) return;
     setForm(EMPTY_DOCTOR_NOTE);
     setSuccess(true);
     setTimeout(() => setSuccess(false), 3000);
@@ -86,8 +89,15 @@ export function ClinicianImportForm() {
         </label>
       </div>
 
-      <Button type="submit" disabled={processing.active} className="mt-8">
-        {processing.active ? "Processing..." : "Submit note"}
+      <Button type="submit" disabled={processing.active} className="mt-8 gap-2">
+        {processing.active ? (
+          <>
+            <ProcessingIndicator size="xs" variant="inverse" />
+            Processing...
+          </>
+        ) : (
+          "Submit note"
+        )}
       </Button>
     </form>
   );

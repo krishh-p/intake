@@ -1,5 +1,6 @@
 "use client";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAuthenticatedSupabase } from "@/lib/supabase/client";
 import type {
   CandidateFact,
@@ -22,13 +23,26 @@ function jsonToValue(value: unknown): string | number | undefined {
 }
 
 async function upsertRows(
-  supabase: NonNullable<ReturnType<typeof getBrowserSupabase>>,
+  supabase: SupabaseClient,
   table: string,
-  rows: Record<string, unknown>[]
+  rows: Record<string, unknown>[],
+  onConflict?: string
 ) {
   if (rows.length === 0) return;
-  const { error } = await supabase.from(table).upsert(rows);
+  const { error } = await supabase.from(table).upsert(
+    rows,
+    onConflict ? { onConflict } : undefined
+  );
   if (error) throw new Error(error.message);
+}
+
+function dedupeRows<T extends Record<string, unknown>>(
+  rows: T[],
+  keyFor: (row: T) => string
+): T[] {
+  const byKey = new Map<string, T>();
+  for (const row of rows) byKey.set(keyFor(row), row);
+  return Array.from(byKey.values());
 }
 
 export async function loadRemoteWorkspace(userId: string): Promise<{
@@ -210,9 +224,27 @@ export async function saveRemoteKnowledge(input: {
   await upsertRows(supabase, "sources", sourceRows);
   await upsertRows(supabase, "source_chunks", chunkRows);
   await upsertRows(supabase, "candidate_facts", candidateRows);
-  await upsertRows(supabase, "clinical_facts", clinicalRows);
-  await upsertRows(supabase, "entities", entityRows);
-  await upsertRows(supabase, "graph_edges", edgeRows);
+  await upsertRows(
+    supabase,
+    "clinical_facts",
+    dedupeRows(clinicalRows, (row) => String(row.event_id)),
+    "event_id"
+  );
+  await upsertRows(
+    supabase,
+    "entities",
+    dedupeRows(entityRows, (row) => `${row.user_id}:${row.kind}:${row.canonical_label}`),
+    "user_id,kind,canonical_label"
+  );
+  await upsertRows(
+    supabase,
+    "graph_edges",
+    dedupeRows(
+      edgeRows,
+      (row) => `${row.user_id}:${row.from_entity_id}:${row.to_entity_id}:${row.relation}`
+    ),
+    "user_id,from_entity_id,to_entity_id,relation"
+  );
   await upsertRows(supabase, "review_items", reviewRows);
 }
 

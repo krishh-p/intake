@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useIntake } from "@/lib/IntakeContext";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
+import { ProcessingIndicator } from "@/components/ui/ProcessingIndicator";
 import { cn } from "@/lib/utils";
 
 export function EmrImportForm() {
@@ -52,9 +53,16 @@ export function EmrImportForm() {
         <Button
           onClick={() => fileInputRef.current?.click()}
           disabled={processing.active}
-          className="mt-6"
+          className="mt-6 gap-2"
         >
-          {processing.active ? "Importing..." : "Choose file"}
+          {processing.active ? (
+            <>
+              <ProcessingIndicator size="xs" variant="inverse" />
+              Importing...
+            </>
+          ) : (
+            "Choose file"
+          )}
         </Button>
       </div>
 

@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { useAuth } from "@/lib/AuthContext";
+import { ProcessingIndicator } from "@/components/ui/ProcessingIndicator";
 import {
   analyzeRisk,
   checkAiHealth,
@@ -72,7 +73,7 @@ type IntakeContextValue = {
   importEmrFile: (file: File) => Promise<void>;
   addVoiceNote: (transcript: string) => Promise<void>;
   completeIntakeConversation: (messages: IntakeChatMessage[]) => Promise<void>;
-  submitDoctorNote: (input: DoctorNoteInput) => Promise<void>;
+  submitDoctorNote: (input: DoctorNoteInput) => Promise<boolean>;
   selectAlert: (id: string | null) => void;
   selectNode: (id: string | null) => void;
   setGraphFilterMode: (mode: "full" | "evidence") => void;
@@ -413,11 +414,11 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
   );
 
   const submitDoctorNote = useCallback(
-    async (input: DoctorNoteInput) => {
-      if (!user) return;
+    async (input: DoctorNoteInput): Promise<boolean> => {
+      if (!user) return false;
       if (!input.clinicianName.trim() || !input.note.trim()) {
         setError("Clinician name and note are required.");
-        return;
+        return false;
       }
       setError(null);
       setProcessing({ active: true, message: "Processing clinician note" });
@@ -435,8 +436,10 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
           },
           result.events,
         );
+        return true;
       } catch (err) {
         setError(err instanceof Error ? err.message : "Note processing failed");
+        return false;
       } finally {
         setProcessing({ active: false, message: "" });
       }
@@ -520,8 +523,9 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
 
   if (!hydrated) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-slate-700" />
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-paper">
+        <ProcessingIndicator size="md" label="Loading workspace" />
+        <p className="text-xs text-ink-faint">Loading workspace</p>
       </div>
     );
   }

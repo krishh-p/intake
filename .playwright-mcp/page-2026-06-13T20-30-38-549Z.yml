@@ -1,0 +1,183 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e5]:
+    - complementary [ref=e6]:
+      - generic [ref=e7]:
+        - link "Intake" [ref=e8] [cursor=pointer]:
+          - /url: /
+        - paragraph [ref=e9]: Health workspace
+      - navigation [ref=e10]:
+        - link "Overview" [ref=e11] [cursor=pointer]:
+          - /url: /
+          - img [ref=e12]
+          - text: Overview
+        - link "Import" [ref=e14] [cursor=pointer]:
+          - /url: /import
+          - img [ref=e15]
+          - text: Import
+        - link "Timeline" [ref=e17] [cursor=pointer]:
+          - /url: /timeline
+          - img [ref=e18]
+          - text: Timeline
+        - link "Knowledge graph" [ref=e20] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e21]
+          - text: Knowledge graph
+        - link "Insights 2" [ref=e183] [cursor=pointer]:
+          - /url: /insights
+          - img [ref=e24]
+          - text: Insights
+          - generic [ref=e184]: "2"
+        - link "Reports" [ref=e26] [cursor=pointer]:
+          - /url: /reports
+          - img [ref=e27]
+          - text: Reports
+      - generic [ref=e29]:
+        - generic [ref=e30]:
+          - paragraph [ref=e31]: E2E Test User
+          - paragraph [ref=e32]: Age 36 · 8 events
+          - paragraph [ref=e33]: e2e-intake-20260613@test.local
+        - button "Sign out" [ref=e34]
+    - main [ref=e38]:
+      - generic [ref=e39]:
+        - generic [ref=e41]:
+          - generic [ref=e42]:
+            - paragraph [ref=e43]: Living map
+            - heading "Knowledge graph" [level=1] [ref=e44]
+          - generic [ref=e45]:
+            - generic [ref=e46]:
+              - generic [ref=e47]:
+                - generic [ref=e48]: Find
+                - textbox "Find" [ref=e49]:
+                  - /placeholder: Search conditions, labs, conversations, sources...
+              - generic [ref=e50]:
+                - button "Full map" [ref=e51]
+                - button "Evidence path" [disabled] [ref=e52]
+                - button "Reset" [ref=e53]
+            - generic [ref=e54]:
+              - button "Barrier" [ref=e55]
+              - button "Has condition" [ref=e56]
+              - button "Source trail" [ref=e57]
+              - button "Follow-up" [ref=e58]
+              - button "Ordered" [ref=e59]
+              - button "Possibly related" [ref=e60]
+              - button "Reported" [ref=e61]
+              - button "Worsening trend" [ref=e63]
+        - generic [ref=e64]:
+          - generic [ref=e65]:
+            - img "Interactive knowledge graph map" [ref=e66]:
+              - generic [ref=e69]:
+                - generic [ref=e72]: PATIENT
+                - generic [ref=e75]: CONDITIONS
+                - generic [ref=e78]: SIGNALS
+                - generic [ref=e81]: TREATMENT
+                - generic [ref=e84]: SOURCES
+                - generic [ref=e123] [cursor=pointer]:
+                  - generic: E2E Test User
+                - generic [ref=e126] [cursor=pointer]:
+                  - generic: Dr. Smith — Nephrology
+                - generic [ref=e128] [cursor=pointer]:
+                  - generic: Nephrology Follow-Up In 4 …
+                - generic [ref=e131] [cursor=pointer]:
+                  - generic: Chronic kidney disease
+                - generic [ref=e134] [cursor=pointer]:
+                  - generic: "eGFR: 42 mL/min"
+                - generic [ref=e143] [cursor=pointer]:
+                  - generic: Edema / swelling
+            - generic [ref=e149]:
+              - paragraph [ref=e150]: Cartography
+              - generic [ref=e151]:
+                - generic [ref=e152]:
+                  - paragraph [ref=e153]: "6"
+                  - paragraph [ref=e154]: Nodes
+                - generic [ref=e155]:
+                  - paragraph [ref=e156]: "7"
+                  - paragraph [ref=e157]: Links
+                - generic [ref=e158]:
+                  - paragraph [ref=e159]: "9"
+                  - paragraph [ref=e160]: Sources
+            - generic [ref=e161]:
+              - paragraph [ref=e162]: Legend
+              - generic [ref=e163]:
+                - generic "The center of the map" [ref=e164]:
+                  - generic [ref=e166]: Patient
+                - generic "Long-running clinical themes" [ref=e167]:
+                  - generic [ref=e169]: Conditions
+                - generic "Symptoms, labs, and vitals" [ref=e170]:
+                  - generic [ref=e172]: Signals
+                - generic "Medications and follow-up" [ref=e173]:
+                  - generic [ref=e175]: Treatment
+                - generic "Conversations and barriers" [ref=e176]:
+                  - generic [ref=e178]: Context
+                - generic "Records and notes" [ref=e179]:
+                  - generic [ref=e181]: Sources
+          - complementary [ref=e186]:
+            - generic [ref=e187]:
+              - generic [ref=e188]:
+                - paragraph [ref=e189]: Condition
+                - heading "Chronic kidney disease" [level=2] [ref=e190]
+              - button "Close" [ref=e191]
+            - generic [ref=e192]:
+              - generic [ref=e193]: 78% confidence
+              - generic [ref=e194]: accepted
+              - generic [ref=e195]: 5 related
+            - generic [ref=e196]:
+              - heading "Nearby concepts" [level=3] [ref=e197]
+              - generic [ref=e198]:
+                - button "E2E Test User Patient" [ref=e199]:
+                  - generic [ref=e200]: E2E Test User
+                  - generic [ref=e201]: Patient
+                - button "Dr. Smith — Nephrology Source" [ref=e202]:
+                  - generic [ref=e203]: Dr. Smith — Nephrology
+                  - generic [ref=e204]: Source
+                - 'button "eGFR: 42 mL/min Lab / vital" [ref=e205]':
+                  - generic [ref=e206]: "eGFR: 42 mL/min"
+                  - generic [ref=e207]: Lab / vital
+                - button "Edema / swelling Symptom" [ref=e208]:
+                  - generic [ref=e209]: Edema / swelling
+                  - generic [ref=e210]: Symptom
+                - button "Nephrology Follow-Up In 4 Weeks Care task" [ref=e211]:
+                  - generic [ref=e212]: Nephrology Follow-Up In 4 Weeks
+                  - generic [ref=e213]: Care task
+            - generic [ref=e214]:
+              - heading "Relationship traces" [level=3] [ref=e215]
+              - list [ref=e216]:
+                - listitem [ref=e217]:
+                  - text: Has condition
+                  - generic [ref=e218]: / 78%
+                - listitem [ref=e219]:
+                  - text: Source trail
+                  - generic [ref=e220]: / 100%
+                - listitem [ref=e221]:
+                  - text: Worsening trend
+                  - generic [ref=e222]: / 82%
+                - listitem [ref=e223]:
+                  - text: Possibly related
+                  - generic [ref=e224]: / 68%
+                - listitem [ref=e225]:
+                  - text: Barrier
+                  - generic [ref=e226]: / 85%
+            - generic [ref=e227]:
+              - heading "Field evidence" [level=3] [ref=e228]
+              - list [ref=e229]:
+                - listitem [ref=e230]:
+                  - paragraph [ref=e231]: Chronic kidney disease
+                  - paragraph
+                  - blockquote [ref=e232]: "Clinician: Dr. Smith (Nephrology) Note: Patient has chronic kidney disease stage 3. eGFR 42 mL/min. Potassium 5.2. Reports leg swelling and shortness of breath on exertion. Currently taking lisinopril 10mg daily. Avoid NSAIDs including ibup"
+                  - generic [ref=e233]: Clinician note · Dr. Smith — Nephrology
+            - generic [ref=e234]:
+              - heading "Metadata" [level=3] [ref=e235]
+              - generic [ref=e236]:
+                - generic [ref=e237]:
+                  - term [ref=e238]: aliases
+                  - definition [ref=e239]: Chronic kidney disease
+                - generic [ref=e240]:
+                  - term [ref=e241]: sourceIds
+                  - definition [ref=e242]: src_1781382595776
+                - generic [ref=e243]:
+                  - term [ref=e244]: latestValue
+                  - definition [ref=e245]
+                - generic [ref=e246]:
+                  - term [ref=e247]: unit
+                  - definition [ref=e248]
+        - generic [ref=e182]: Scroll to zoom · Drag the canvas to pan · Drag nodes to pin them · Click a node to focus its neighborhood

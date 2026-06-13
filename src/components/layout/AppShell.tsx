@@ -1,6 +1,7 @@
 "use client";
 
 import { Sidebar } from "@/components/layout/Sidebar";
+import { ProcessingIndicator } from "@/components/ui/ProcessingIndicator";
 import { useIntake } from "@/lib/IntakeContext";
 
 function ProcessingBar() {
@@ -8,9 +9,16 @@ function ProcessingBar() {
   if (!processing.active) return null;
 
   return (
-    <div className="flex items-center gap-2 border-b border-line bg-surface px-6 py-2 text-xs text-ink-muted">
-      <span className="h-3 w-3 animate-spin rounded-full border-2 border-line border-t-accent" />
-      {processing.message}
+    <div
+      className="processing-bar relative overflow-hidden border-b border-line bg-surface"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="processing-bar__shimmer" aria-hidden />
+      <div className="flex items-center gap-3 px-6 py-2.5">
+        <ProcessingIndicator size="sm" label={processing.message} />
+        <span className="text-xs text-ink-muted">{processing.message}</span>
+      </div>
     </div>
   );
 }

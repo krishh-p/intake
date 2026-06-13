@@ -7,6 +7,7 @@ import { useIntake } from "@/lib/IntakeContext";
 import { useAuth } from "@/lib/AuthContext";
 import { Alert } from "@/components/ui/Alert";
 import { Button } from "@/components/ui/Button";
+import { ProcessingIndicator } from "@/components/ui/ProcessingIndicator";
 import { cn } from "@/lib/utils";
 
 const STATUS_LABEL: Record<VoiceSessionStatus, string> = {
@@ -139,8 +140,15 @@ export function IntakeConversation() {
                 Start voice session
               </Button>
             ) : (
-              <Button variant="danger" onClick={() => void autoSaveAndEnd()} disabled={isSaving}>
-                {isSaving ? "Saving…" : "End session"}
+              <Button variant="danger" onClick={() => void autoSaveAndEnd()} disabled={isSaving} className="gap-2">
+                {isSaving ? (
+                  <>
+                    <ProcessingIndicator size="xs" variant="inverse" />
+                    Saving…
+                  </>
+                ) : (
+                  "End session"
+                )}
               </Button>
             )}
           </div>
@@ -195,7 +203,7 @@ function StatusPill({ status, saving }: { status: VoiceSessionStatus; saving: bo
       )}
     >
       {(live || saving) && (
-        <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+        <ProcessingIndicator size="xs" className="mr-1.5 inline-flex translate-y-px" />
       )}
       {label}
     </span>

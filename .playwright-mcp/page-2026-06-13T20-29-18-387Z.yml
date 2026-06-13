@@ -1,0 +1,50 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e23]
+  - generic [ref=e32]:
+    - complementary [ref=e33]:
+      - generic [ref=e34]:
+        - link "Intake" [ref=e35] [cursor=pointer]:
+          - /url: /
+        - paragraph [ref=e36]: Health workspace
+      - navigation [ref=e37]:
+        - link "Overview" [ref=e38] [cursor=pointer]:
+          - /url: /
+          - img [ref=e39]
+          - text: Overview
+        - link "Import" [ref=e41] [cursor=pointer]:
+          - /url: /import
+          - img [ref=e42]
+          - text: Import
+        - link "Timeline" [ref=e44] [cursor=pointer]:
+          - /url: /timeline
+          - img [ref=e45]
+          - text: Timeline
+        - link "Knowledge graph" [ref=e47] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e48]
+          - text: Knowledge graph
+        - link "Insights" [ref=e50] [cursor=pointer]:
+          - /url: /insights
+          - img [ref=e51]
+          - text: Insights
+        - link "Reports" [ref=e53] [cursor=pointer]:
+          - /url: /reports
+          - img [ref=e54]
+          - text: Reports
+      - generic [ref=e56]:
+        - generic [ref=e57]:
+          - paragraph [ref=e58]: E2E Test User
+          - paragraph [ref=e59]: Age 36 · 0 events
+          - paragraph [ref=e60]: e2e-intake-20260613@test.local
+        - button "Sign out" [ref=e61]
+    - main [ref=e63]:
+      - generic [ref=e64]:
+        - generic [ref=e66]:
+          - heading "Welcome back, E2E" [level=1] [ref=e67]
+          - paragraph [ref=e68]: Your private workspace for organizing health data, surfacing patterns, and preparing for appointments.
+        - generic [ref=e69]:
+          - heading "Start by importing your data" [level=2] [ref=e70]
+          - paragraph [ref=e71]: Upload medical records, talk to Intake, or enter a clinician note. Intake will connect everything into a searchable health graph.
+          - link "Import health data" [ref=e72] [cursor=pointer]:
+            - /url: /import
+            - button "Import health data" [ref=e73]

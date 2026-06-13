@@ -1,0 +1,54 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e5]:
+    - complementary [ref=e6]:
+      - generic [ref=e7]:
+        - link "Intake" [ref=e8] [cursor=pointer]:
+          - /url: /
+        - paragraph [ref=e9]: Health workspace
+      - navigation [ref=e10]:
+        - link "Overview" [ref=e11] [cursor=pointer]:
+          - /url: /
+          - img [ref=e12]
+          - text: Overview
+        - link "Import" [ref=e14] [cursor=pointer]:
+          - /url: /import
+          - img [ref=e15]
+          - text: Import
+        - link "Timeline" [ref=e17] [cursor=pointer]:
+          - /url: /timeline
+          - img [ref=e18]
+          - text: Timeline
+        - link "Knowledge graph" [ref=e20] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e21]
+          - text: Knowledge graph
+        - link "Insights 3" [ref=e55] [cursor=pointer]:
+          - /url: /insights
+          - img [ref=e24]
+          - text: Insights
+          - generic [ref=e26]: "3"
+        - link "Reports" [ref=e27] [cursor=pointer]:
+          - /url: /reports
+          - img [ref=e28]
+          - text: Reports
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - paragraph [ref=e32]: E2E Test User
+          - paragraph [ref=e33]: Age 36 · 13 events
+          - paragraph [ref=e34]: e2e-intake-20260613@test.local
+        - button "Sign out" [ref=e35]
+    - main [ref=e37]:
+      - generic [ref=e38]:
+        - link "Back to import" [ref=e39] [cursor=pointer]:
+          - /url: /import
+        - generic [ref=e41]:
+          - heading "Medical records" [level=1] [ref=e42]
+          - paragraph [ref=e43]: Upload a JSON file exported from your EMR. Supported fields include conditions, medications, labs, vitals, encounters, and care tasks.
+        - generic [ref=e45]:
+          - generic [ref=e46]:
+            - paragraph [ref=e47]: Records imported successfully
+            - paragraph [ref=e48]: EMR export · JSON format
+            - paragraph [ref=e53]: e2e-sample-emr.json
+            - button "Choose file" [ref=e56]
+          - paragraph [ref=e50]: You can upload multiple files over time. Each import is added to your timeline and knowledge graph.

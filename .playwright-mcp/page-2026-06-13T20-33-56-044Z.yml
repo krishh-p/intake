@@ -1,0 +1,61 @@
+- generic [active] [ref=e1]:
+  - alert [ref=e2]
+  - generic [ref=e5]:
+    - complementary [ref=e6]:
+      - generic [ref=e7]:
+        - link "Intake" [ref=e8] [cursor=pointer]:
+          - /url: /
+        - paragraph [ref=e9]: Health workspace
+      - navigation [ref=e10]:
+        - link "Overview" [ref=e11] [cursor=pointer]:
+          - /url: /
+          - img [ref=e12]
+          - text: Overview
+        - link "Import" [ref=e14] [cursor=pointer]:
+          - /url: /import
+          - img [ref=e15]
+          - text: Import
+        - link "Timeline" [ref=e17] [cursor=pointer]:
+          - /url: /timeline
+          - img [ref=e18]
+          - text: Timeline
+        - link "Knowledge graph" [ref=e20] [cursor=pointer]:
+          - /url: /graph
+          - img [ref=e21]
+          - text: Knowledge graph
+        - link "Insights 3" [ref=e23] [cursor=pointer]:
+          - /url: /insights
+          - img [ref=e24]
+          - text: Insights
+          - generic [ref=e26]: "3"
+        - link "Reports" [ref=e27] [cursor=pointer]:
+          - /url: /reports
+          - img [ref=e28]
+          - text: Reports
+      - generic [ref=e30]:
+        - generic [ref=e31]:
+          - paragraph [ref=e32]: E2E Test User
+          - paragraph [ref=e33]: Age 36 · 13 events
+          - paragraph [ref=e34]: e2e-intake-20260613@test.local
+        - button "Sign out" [ref=e35]
+    - main [ref=e37]:
+      - generic [ref=e38]:
+        - generic [ref=e40]:
+          - heading "Import health data" [level=1] [ref=e41]
+          - paragraph [ref=e42]: Add information from your records, your own observations, or a clinician visit.
+        - generic [ref=e43]:
+          - link "Medical records Upload a JSON export from your electronic medical record system. Continue" [ref=e44] [cursor=pointer]:
+            - /url: /import/records
+            - heading "Medical records" [level=2] [ref=e45]
+            - paragraph [ref=e46]: Upload a JSON export from your electronic medical record system.
+            - generic [ref=e47]: Continue
+          - link "Talk to Intake Live voice session with Intake about symptoms, medications, and care barriers. Continue" [ref=e48] [cursor=pointer]:
+            - /url: /import/voice
+            - heading "Talk to Intake" [level=2] [ref=e49]
+            - paragraph [ref=e50]: Live voice session with Intake about symptoms, medications, and care barriers.
+            - generic [ref=e51]: Continue
+          - link "Clinician note Enter notes, labs, and follow-up tasks from a recent visit. Continue" [ref=e52] [cursor=pointer]:
+            - /url: /import/clinician
+            - heading "Clinician note" [level=2] [ref=e53]
+            - paragraph [ref=e54]: Enter notes, labs, and follow-up tasks from a recent visit.
+            - generic [ref=e55]: Continue

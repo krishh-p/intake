@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
+import { getXaiModel, getXaiVoice, getXaiVoiceModel, isAiConfigured } from "@/lib/ai/xai";
 import { buildIntakeVoiceInstructions } from "@/lib/voice/intakeVoiceInstructions";
 
 const SESSION_URL = "https://api.x.ai/v1/realtime/client_secrets";
-const VOICE = process.env.XAI_VOICE ?? "ara";
-const MODEL = process.env.XAI_VOICE_MODEL ?? "grok-voice-latest";
 
 export async function POST(request: Request) {
   try {
@@ -42,8 +41,8 @@ export async function POST(request: Request) {
     return NextResponse.json({
       token: data.value,
       expiresAt: data.expires_at,
-      voice: VOICE,
-      model: MODEL,
+      voice: getXaiVoice(),
+      model: getXaiVoiceModel(),
       instructions: buildIntakeVoiceInstructions(patientName),
     });
   } catch (error) {

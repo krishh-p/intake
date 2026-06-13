@@ -1,0 +1,7 @@
+{
+  "conditions": [{ "label": "Type 2 diabetes", "onset": "2022-03-01", "status": "active" }],
+  "medications": [{ "label": "Metformin", "dose": "500mg twice daily", "start": "2022-03-15" }],
+  "labs": [{ "label": "HbA1c", "value": 7.8, "unit": "%", "date": "2026-05-01" }],
+  "vitals": [{ "label": "Blood pressure", "value": "138/88", "date": "2026-05-01" }],
+  "careTasks": [{ "label": "Annual eye exam", "due": "2026-08-01" }]
+}
