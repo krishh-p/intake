@@ -1,0 +1,51 @@
+{
+  "conditions": [
+    { "label": "Type 2 diabetes mellitus", "onset": "2022-03-01", "status": "active" },
+    { "label": "Chronic kidney disease stage 3", "onset": "2024-06-01", "status": "active" }
+  ],
+  "medications": [
+    { "label": "Metformin", "dose": "1000mg twice daily", "start": "2022-03-15", "status": "active" },
+    { "label": "Lisinopril", "dose": "10mg daily", "start": "2024-06-01", "status": "active" }
+  ],
+  "labs": [
+    { "label": "HbA1c", "value": 6.8, "unit": "%", "date": "2025-12-01" },
+    { "label": "HbA1c", "value": 7.2, "unit": "%", "date": "2026-02-01" },
+    { "label": "HbA1c", "value": 7.8, "unit": "%", "date": "2026-04-01" },
+    { "label": "HbA1c", "value": 8.6, "unit": "%", "date": "2026-06-01" },
+    { "label": "eGFR", "value": 72, "unit": "mL/min", "date": "2025-12-01" },
+    { "label": "eGFR", "value": 65, "unit": "mL/min", "date": "2026-02-01" },
+    { "label": "eGFR", "value": 56, "unit": "mL/min", "date": "2026-04-01" },
+    { "label": "eGFR", "value": 48, "unit": "mL/min", "date": "2026-06-01" },
+    { "label": "Potassium", "value": 4.1, "unit": "mEq/L", "date": "2025-12-01" },
+    { "label": "Potassium", "value": 4.5, "unit": "mEq/L", "date": "2026-02-01" },
+    { "label": "Potassium", "value": 5.0, "unit": "mEq/L", "date": "2026-04-01" },
+    { "label": "Potassium", "value": 5.3, "unit": "mEq/L", "date": "2026-06-01" }
+  ],
+  "vitals": [
+    { "label": "Weight", "value": 182, "unit": "lb", "date": "2025-12-01" },
+    { "label": "Weight", "value": 186, "unit": "lb", "date": "2026-02-01" },
+    { "label": "Weight", "value": 191, "unit": "lb", "date": "2026-04-01" },
+    { "label": "Weight", "value": 196, "unit": "lb", "date": "2026-06-01" },
+    { "label": "Blood pressure", "value": "132/84", "date": "2025-12-01" },
+    { "label": "Blood pressure", "value": "138/86", "date": "2026-02-01" },
+    { "label": "Blood pressure", "value": "144/90", "date": "2026-04-01" },
+    { "label": "Blood pressure", "value": "148/92", "date": "2026-06-01" }
+  ],
+  "encounters": [
+    {
+      "label": "Endocrinology follow-up",
+      "clinician": "Dr. Patel",
+      "specialty": "endocrinology",
+      "date": "2026-04-15"
+    },
+    {
+      "label": "Nephrology referral pending",
+      "clinician": "Dr. Chen",
+      "specialty": "nephrology",
+      "date": "2026-05-01"
+    }
+  ],
+  "careTasks": [
+    { "label": "Repeat BMP and HbA1c in 3 months", "due": "2026-09-01", "status": "pending" }
+  ]
+}

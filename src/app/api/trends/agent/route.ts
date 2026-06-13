@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   if (!isAiConfigured()) {
     return new Response(
       sseLine({ type: "error", error: "XAI_API_KEY is not configured" }),
-      { status: 503, headers: SSE_HEADERS }
+      { status: 503, headers: SSE_HEADERS },
     );
   }
 
@@ -33,10 +33,13 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return new Response(sseLine({ type: "error", error: "Invalid JSON body" }), {
-      status: 400,
-      headers: SSE_HEADERS,
-    });
+    return new Response(
+      sseLine({ type: "error", error: "Invalid JSON body" }),
+      {
+        status: 400,
+        headers: SSE_HEADERS,
+      },
+    );
   }
 
   const { patientName, events, sources } = body;
@@ -44,7 +47,7 @@ export async function POST(request: Request) {
   if (!patientName?.trim() || !events?.length) {
     return new Response(
       sseLine({ type: "error", error: "patientName and events are required" }),
-      { status: 400, headers: SSE_HEADERS }
+      { status: 400, headers: SSE_HEADERS },
     );
   }
 
