@@ -27,7 +27,9 @@ import type {
 import { generateId, stableId } from "@/lib/utils";
 import { generateReport } from "@/lib/reports/generateReport";
 import { acceptCandidate, healthEventFromFact } from "@/lib/knowledge/facts";
+import { computeConfidence } from "@/lib/knowledge/confidence";
 import { normalizeLabel } from "@/lib/knowledge/normalize";
+import { groundConcept } from "@/lib/knowledge/ontology";
 import { isRelationValid } from "@/lib/knowledge/graphSchema";
 
 type ExtractedCandidateFact = {
@@ -138,6 +140,13 @@ export async function aiExtractCandidateFacts(
         ? (fact.relevance as CandidateFact["relevance"])
         : "evidence_only";
 
+      const aiScore =
+        typeof fact.confidence === "number"
+          ? Math.max(0, Math.min(1, fact.confidence))
+          : 0.65;
+      const grounded = groundConcept(normalizedLabel, kind);
+      const evidenceQuote = fact.evidenceQuote?.trim();
+
       return {
         id: stableId("cand", `${sourceId}:${kind}:${normalizedLabel}:${observedAt}:${String(fact.value ?? "")}`),
         patientId,
@@ -152,15 +161,24 @@ export async function aiExtractCandidateFacts(
           ? fact.status
           : "active") as HealthEvent["status"],
         relevance,
-        confidence:
-          typeof fact.confidence === "number"
-            ? Math.max(0, Math.min(1, fact.confidence))
-            : 0.65,
-        evidenceQuote: fact.evidenceQuote,
+        confidence: computeConfidence({
+          sourceType,
+          aiExtracted: true,
+          aiScore,
+          grounded: grounded.known,
+          hasQuote: Boolean(evidenceQuote),
+          hasCoding: Boolean(grounded.coding),
+          uncertain: fact.uncertain ?? false,
+          sourceCount: 1,
+        }),
+        evidenceQuote,
         negated: fact.negated ?? false,
         uncertain: fact.uncertain ?? false,
+        coding: grounded.coding,
         metadata: {
           aiExtracted: true,
+          aiScore,
+          grounded: grounded.known,
           model: "grok",
           promptVersion: "candidate-facts-v1",
         },

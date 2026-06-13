@@ -28,6 +28,7 @@ import {
   INTERACTION_RULES,
   type Severity,
 } from "@/lib/knowledge/ontology";
+import { CONFIDENCE_REVIEW } from "@/lib/knowledge/confidence";
 import { isRelationValid } from "@/lib/knowledge/graphSchema";
 import { similarity } from "@/lib/knowledge/entityResolution";
 import { computeTrends } from "@/lib/knowledge/temporal";
@@ -101,7 +102,7 @@ export function buildKnowledgeRelationships(
       evidenceFactIds: evidenceFacts.map((f) => f.id),
       provenance: evidenceFacts.flatMap((f) => f.provenance),
       reviewStatus:
-        confidence < 0.75 || evidenceFacts.some((f) => f.reviewStatus === "needs_review")
+        confidence < CONFIDENCE_REVIEW || evidenceFacts.some((f) => f.reviewStatus === "needs_review")
           ? "needs_review"
           : "accepted",
       rationale,

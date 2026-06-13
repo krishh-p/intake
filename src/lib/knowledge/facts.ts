@@ -7,6 +7,13 @@ import type {
   Source,
   SourceChunk,
 } from "@/lib/schema";
+import {
+  applyCorroborationBoost,
+  computeConfidence,
+  CONFIDENCE_REJECT,
+  CONFIDENCE_REVIEW,
+  deriveReviewStatus,
+} from "@/lib/knowledge/confidence";
 import { chunkSource } from "@/lib/knowledge/chunk";
 import { normalizeLabel } from "@/lib/knowledge/normalize";
 import { groundConcept, interpretLabValue } from "@/lib/knowledge/ontology";
@@ -38,6 +45,13 @@ export function candidateFromEvent(event: HealthEvent, source?: Source): Candida
       ? event.value
       : source?.rawText?.slice(0, 240);
 
+  const aiScore =
+    typeof event.metadata?.aiScore === "number"
+      ? event.metadata.aiScore
+      : typeof event.metadata?.confidence === "number" && event.metadata?.aiExtracted
+        ? event.metadata.confidence
+        : undefined;
+
   return {
     id: stableId("cand", `${event.id}:${event.sourceId}:${event.type}:${event.label}`),
     patientId: event.patientId,
@@ -50,13 +64,26 @@ export function candidateFromEvent(event: HealthEvent, source?: Source): Candida
     observedAt: event.observedAt,
     status: event.status,
     relevance: relevanceForEvent(event),
-    confidence: event.metadata?.aiExtracted ? 0.78 : 0.92,
+    confidence: computeConfidence({
+      sourceType: source?.type,
+      aiExtracted: Boolean(event.metadata?.aiExtracted),
+      aiScore,
+      grounded: grounded.known,
+      hasQuote: Boolean(evidenceQuote?.trim()),
+      hasCoding: Boolean(grounded.coding),
+      uncertain: Boolean(event.metadata?.uncertain),
+      sourceCount: 1,
+    }),
     evidenceQuote,
     uncertain: Boolean(event.metadata?.uncertain),
     negated: Boolean(event.metadata?.negated),
     coding: grounded.coding,
     labFlag: grounded.kind === "lab" ? interpretLabValue(grounded, event.value) : undefined,
-    metadata: event.metadata,
+    metadata: {
+      ...event.metadata,
+      grounded: grounded.known,
+      ...(aiScore !== undefined ? { aiScore } : {}),
+    },
   };
 }
 
@@ -67,16 +94,18 @@ export function validateCandidate(candidate: CandidateFact): {
   if (!candidate.label.trim()) return { accepted: false, reviewReason: "Empty label" };
   if (candidate.relevance === "ignore") return { accepted: false, reviewReason: "Marked irrelevant" };
   if (candidate.negated) return { accepted: false, reviewReason: "Negated fact" };
-  if (candidate.confidence < 0.45) return { accepted: false, reviewReason: "Low extraction confidence" };
+  if (candidate.confidence < CONFIDENCE_REJECT) {
+    return { accepted: false, reviewReason: "Low extraction confidence" };
+  }
   if (Number.isNaN(new Date(candidate.observedAt).getTime())) {
     return { accepted: false, reviewReason: "Invalid observed date" };
   }
+  const needsReview = deriveReviewStatus(candidate.confidence, candidate.uncertain) === "needs_review";
   return {
     accepted: true,
-    reviewReason:
-      candidate.confidence < 0.75 || candidate.uncertain
-        ? "Needs review due to uncertainty or medium confidence"
-        : undefined,
+    reviewReason: needsReview
+      ? "Needs review due to uncertainty or medium confidence"
+      : undefined,
   };
 }
 
@@ -160,6 +189,7 @@ export function healthEventFromFact(fact: ClinicalFact): HealthEvent {
       ...fact.metadata,
       factId: fact.id,
       confidence: fact.confidence,
+      aiScore: fact.metadata?.aiScore,
       relevance: fact.relevance,
       reviewStatus: fact.reviewStatus,
       evidenceQuote: fact.evidenceQuote,
@@ -198,7 +228,8 @@ export function buildKnowledgeFromEvents(sources: Source[], events: HealthEvent[
     clinicalFacts.push(withValidity(accepted.fact, recordedAt));
   }
 
-  const entities = resolveEntities(clinicalFacts);
-  reviewItems.push(...detectContradictions(clinicalFacts));
-  return { sourceChunks, candidateFacts, clinicalFacts, entities, reviewItems };
+  const boostedFacts = applyCorroborationBoost(clinicalFacts, sourceMap);
+  const entities = resolveEntities(boostedFacts);
+  reviewItems.push(...detectContradictions(boostedFacts));
+  return { sourceChunks, candidateFacts, clinicalFacts: boostedFacts, entities, reviewItems };
 }
