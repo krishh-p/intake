@@ -21,6 +21,16 @@ function jsonToValue(value: unknown): string | number | undefined {
   return undefined;
 }
 
+async function upsertRows(
+  supabase: NonNullable<ReturnType<typeof getBrowserSupabase>>,
+  table: string,
+  rows: Record<string, unknown>[]
+) {
+  if (rows.length === 0) return;
+  const { error } = await supabase.from(table).upsert(rows);
+  if (error) throw new Error(error.message);
+}
+
 export async function loadRemoteWorkspace(userId: string): Promise<{
   sources: Source[];
   events: HealthEvent[];
@@ -80,6 +90,8 @@ export async function saveRemoteKnowledge(input: {
   const supabase = getBrowserSupabase();
   if (!supabase) return;
 
+  const sourceIds = new Set(input.sources.map((source) => source.id));
+
   const sourceRows = input.sources.map((source) => ({
     id: source.id,
     user_id: input.userId,
@@ -89,7 +101,9 @@ export async function saveRemoteKnowledge(input: {
     raw_text: source.rawText ?? null,
     metadata: {},
   }));
-  const chunkRows = input.sourceChunks.map((chunk) => ({
+  const chunkRows = input.sourceChunks
+    .filter((chunk) => sourceIds.has(chunk.sourceId))
+    .map((chunk) => ({
     id: chunk.id,
     user_id: input.userId,
     source_id: chunk.sourceId,
@@ -99,11 +113,15 @@ export async function saveRemoteKnowledge(input: {
     text: chunk.text,
     metadata: {},
   }));
-  const candidateRows = input.candidateFacts.map((fact) => ({
+  const chunkIds = new Set(chunkRows.map((chunk) => chunk.id));
+
+  const candidateRows = input.candidateFacts
+    .filter((fact) => sourceIds.has(fact.sourceId))
+    .map((fact) => ({
     id: fact.id,
     user_id: input.userId,
     source_id: fact.sourceId,
-    chunk_id: fact.chunkId ?? null,
+    chunk_id: fact.chunkId && chunkIds.has(fact.chunkId) ? fact.chunkId : null,
     kind: fact.kind,
     label: fact.label,
     normalized_label: fact.normalizedLabel,
@@ -118,12 +136,14 @@ export async function saveRemoteKnowledge(input: {
     uncertain: fact.uncertain ?? false,
     metadata: fact.metadata ?? {},
   }));
-  const clinicalRows = input.clinicalFacts.map((fact) => ({
+  const clinicalRows = input.clinicalFacts
+    .filter((fact) => sourceIds.has(fact.sourceId))
+    .map((fact) => ({
     id: fact.id,
     user_id: input.userId,
     event_id: fact.eventId,
     source_id: fact.sourceId,
-    chunk_id: fact.chunkId ?? null,
+    chunk_id: fact.chunkId && chunkIds.has(fact.chunkId) ? fact.chunkId : null,
     entity_id: fact.entityId ?? null,
     kind: fact.kind,
     label: fact.label,
@@ -152,7 +172,10 @@ export async function saveRemoteKnowledge(input: {
     fact_ids: entity.factIds,
     metadata: entity.metadata ?? {},
   }));
-  const edgeRows = input.graphRelationships.map((edge) => ({
+  const entityIds = new Set(entityRows.map((entity) => entity.id));
+  const edgeRows = input.graphRelationships
+    .filter((edge) => entityIds.has(edge.fromEntityId) && entityIds.has(edge.toEntityId))
+    .map((edge) => ({
     id: edge.id,
     user_id: input.userId,
     from_entity_id: edge.fromEntityId,
@@ -174,19 +197,13 @@ export async function saveRemoteKnowledge(input: {
     created_at: item.createdAt,
   }));
 
-  const operations = [
-    sourceRows.length ? supabase.from("sources").upsert(sourceRows) : null,
-    chunkRows.length ? supabase.from("source_chunks").upsert(chunkRows) : null,
-    candidateRows.length ? supabase.from("candidate_facts").upsert(candidateRows) : null,
-    clinicalRows.length ? supabase.from("clinical_facts").upsert(clinicalRows) : null,
-    entityRows.length ? supabase.from("entities").upsert(entityRows) : null,
-    edgeRows.length ? supabase.from("graph_edges").upsert(edgeRows) : null,
-    reviewRows.length ? supabase.from("review_items").upsert(reviewRows) : null,
-  ].filter((operation): operation is NonNullable<typeof operation> => Boolean(operation));
-
-  const results = await Promise.all(operations);
-  const failure = results.find((result) => result.error);
-  if (failure?.error) throw new Error(failure.error.message);
+  await upsertRows(supabase, "sources", sourceRows);
+  await upsertRows(supabase, "source_chunks", chunkRows);
+  await upsertRows(supabase, "candidate_facts", candidateRows);
+  await upsertRows(supabase, "clinical_facts", clinicalRows);
+  await upsertRows(supabase, "entities", entityRows);
+  await upsertRows(supabase, "graph_edges", edgeRows);
+  await upsertRows(supabase, "review_items", reviewRows);
 }
 
 export async function clearRemoteWorkspace(userId: string) {
