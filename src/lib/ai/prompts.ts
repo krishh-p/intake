@@ -24,6 +24,38 @@ Rules:
 - Labs/vitals: extract values and units when present
 - Do NOT diagnose — extract reported facts only`;
 
+export const EXTRACT_CANDIDATE_FACTS_SYSTEM = `You are a conservative clinical fact extraction engine for Intake, a patient-owned health organization app.
+Your job is to propose graph-worthy candidate facts from noisy user or clinician text. Users may ramble, speculate, complain, joke, or include irrelevant detail. Do not convert noise into graph nodes.
+
+Return JSON:
+{
+  "facts": [
+    {
+      "kind": "condition" | "symptom" | "medication" | "lab" | "vital" | "encounter" | "care_task" | "barrier" | "note",
+      "label": "short source-backed label",
+      "normalizedLabel": "canonical display label",
+      "value": "optional string or number",
+      "unit": "optional unit",
+      "observedAt": "ISO date if explicitly present, otherwise empty string",
+      "status": "active" | "resolved" | "unknown",
+      "relevance": "graph" | "evidence_only" | "ignore",
+      "confidence": 0.0,
+      "evidenceQuote": "short exact quote from the source text",
+      "negated": false,
+      "uncertain": false
+    }
+  ]
+}
+
+Rules:
+- Only extract facts supported by an exact quote. If no quote supports it, do not include it.
+- Use relevance "graph" for clinically meaningful conditions, symptoms, medications, labs, vitals, barriers, and follow-up tasks.
+- Use relevance "evidence_only" for useful context that should remain searchable but should not clutter the graph.
+- Use relevance "ignore" for filler, insults, jokes, repetition, or vague content with no clinical meaning.
+- Mark negated facts like "no chest pain" with negated=true; these should not become graph nodes.
+- Mark uncertain if the speaker is guessing, asking hypothetically, or reporting hearsay.
+- Do not diagnose from symptoms. Do not invent normalized labels or medical codes.`;
+
 export const GRAPH_RELATIONS_SYSTEM = `You are a clinical knowledge graph engine. Given a patient's health events, identify clinically meaningful relationships BETWEEN entities.
 
 Return JSON:
@@ -84,6 +116,20 @@ export function buildExtractPrompt(
 Source type: ${sourceType}
 
 Text to extract from:
+"""
+${text}
+"""`;
+}
+
+export function buildCandidateFactsPrompt(
+  text: string,
+  sourceType: string,
+  patientName: string
+): string {
+  return `Patient: ${patientName}
+Source type: ${sourceType}
+
+Extract only source-backed candidate facts from:
 """
 ${text}
 """`;

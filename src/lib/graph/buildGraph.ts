@@ -1,12 +1,17 @@
 import type {
   ConversationContext,
+  ClinicalFact,
+  Entity,
   GraphEdge,
   GraphNode,
+  GraphRelationship,
   HealthEvent,
   Source,
 } from "@/lib/schema";
 import { addConversationNodesToGraph } from "@/lib/graph/conversationNode";
-import { generateId } from "@/lib/utils";
+import { buildKnowledgeFromEvents } from "@/lib/knowledge/facts";
+import { buildKnowledgeRelationships } from "@/lib/knowledge/relationships";
+import { stableId } from "@/lib/utils";
 
 export function buildGraph(
   patientName: string,
@@ -14,8 +19,35 @@ export function buildGraph(
   sources: Source[],
   contexts: ConversationContext[] = []
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
+  const knowledge = buildKnowledgeFromEvents(sources, events);
+  const relationships = buildKnowledgeRelationships(
+    events[0]?.patientId ?? "patient",
+    knowledge.entities,
+    knowledge.clinicalFacts
+  );
+  return buildGraphFromKnowledge(
+    patientName,
+    sources,
+    knowledge.clinicalFacts,
+    knowledge.entities,
+    relationships.relationships,
+    contexts,
+    events
+  );
+}
+
+export function buildGraphFromKnowledge(
+  patientName: string,
+  sources: Source[],
+  clinicalFacts: ClinicalFact[],
+  entities: Entity[],
+  graphRelationships: GraphRelationship[],
+  contexts: ConversationContext[] = [],
+  events: HealthEvent[] = []
+): { nodes: GraphNode[]; edges: GraphEdge[] } {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
+  const factsById = new Map(clinicalFacts.map((fact) => [fact.id, fact]));
 
   const patientNode: GraphNode = {
     id: "node_patient",
@@ -24,84 +56,96 @@ export function buildGraph(
   };
   nodes.push(patientNode);
 
-  const sourceNodes = sources.map((s) => ({
-    id: `node_src_${s.id}`,
+  const sourceNodes = sources.map((source) => ({
+    id: `node_src_${source.id}`,
     kind: "source" as const,
-    label: s.title,
-    metadata: { sourceType: s.type },
+    label: source.title,
+    metadata: { sourceType: source.type },
   }));
   nodes.push(...sourceNodes);
 
-  const grouped = new Map<string, HealthEvent[]>();
-  for (const event of events) {
-    const key = `${event.type}:${event.label}`;
-    const list = grouped.get(key) ?? [];
-    list.push(event);
-    grouped.set(key, list);
-  }
-
-  for (const [, groupEvents] of grouped) {
-    const first = groupEvents[0];
-    const nodeId = `node_${first.type}_${first.id}`;
+  for (const entity of entities) {
+    const entityFacts = entity.factIds
+      .map((id) => factsById.get(id))
+      .filter((fact): fact is ClinicalFact => Boolean(fact));
+    if (entityFacts.length === 0) continue;
+    const eventIds = entityFacts.map((fact) => fact.eventId);
     const node: GraphNode = {
-      id: nodeId,
-      kind: mapEventTypeToNodeKind(first.type),
-      label: formatNodeLabel(first, groupEvents),
-      eventIds: groupEvents.map((e) => e.id),
+      id: entity.id,
+      kind: entity.kind,
+      label: formatEntityLabel(entity, entityFacts),
+      eventIds,
+      factIds: entity.factIds,
+      confidence: entity.confidence,
+      reviewStatus: entity.reviewStatus,
       metadata: {
-        eventType: first.type,
-        latestValue: groupEvents[groupEvents.length - 1].value,
-        unit: first.unit,
+        aliases: entity.aliases,
+        sourceIds: entity.metadata?.sourceIds,
+        latestValue: latestFact(entityFacts).value,
+        unit: latestFact(entityFacts).unit,
       },
     };
     nodes.push(node);
 
+    const firstFact = entityFacts[0];
     edges.push({
-      id: generateId("edge"),
+      id: stableId("edge", `patient:${entity.id}:${firstFact.kind}`),
       from: patientNode.id,
-      to: nodeId,
-      relation: relationForEventType(first.type),
-      evidenceEventIds: groupEvents.map((e) => e.id),
+      to: entity.id,
+      relation: relationForEventType(firstFact.kind),
+      evidenceEventIds: eventIds,
+      evidenceFactIds: entity.factIds,
+      confidence: entity.confidence,
+      reviewStatus: entity.reviewStatus,
+      metadata: { source: "facts" },
     });
 
-    const sourceNodeId = `node_src_${first.sourceId}`;
-    if (nodes.some((n) => n.id === sourceNodeId)) {
+    for (const sourceId of new Set(entityFacts.map((fact) => fact.sourceId))) {
+      const sourceNodeId = `node_src_${sourceId}`;
+      if (!nodes.some((n) => n.id === sourceNodeId)) continue;
       edges.push({
-        id: generateId("edge"),
-        from: nodeId,
+        id: stableId("edge", `${entity.id}:source:${sourceId}`),
+        from: entity.id,
         to: sourceNodeId,
         relation: "mentioned_in",
-        evidenceEventIds: groupEvents.map((e) => e.id),
+        evidenceEventIds: entityFacts
+          .filter((fact) => fact.sourceId === sourceId)
+          .map((fact) => fact.eventId),
+        evidenceFactIds: entityFacts
+          .filter((fact) => fact.sourceId === sourceId)
+          .map((fact) => fact.id),
+        confidence: 1,
+        reviewStatus: "accepted",
+        metadata: { source: "provenance" },
       });
     }
   }
 
-  addClinicalRelationships(nodes, edges, events);
   addConversationNodesToGraph(patientNode.id, nodes, edges, contexts, events);
+  for (const relationship of graphRelationships) {
+    const from = nodes.find((node) => node.id === relationship.fromEntityId);
+    const to = nodes.find((node) => node.id === relationship.toEntityId);
+    if (!from || !to) continue;
+    const evidenceFacts = relationship.evidenceFactIds
+      .map((id) => factsById.get(id))
+      .filter((fact): fact is ClinicalFact => Boolean(fact));
+    edges.push({
+      id: relationship.id,
+      from: relationship.fromEntityId,
+      to: relationship.toEntityId,
+      relation: relationship.relation,
+      evidenceEventIds: evidenceFacts.map((fact) => fact.eventId),
+      evidenceFactIds: relationship.evidenceFactIds,
+      confidence: relationship.confidence,
+      reviewStatus: relationship.reviewStatus,
+      metadata: {
+        ...relationship.metadata,
+        provenance: relationship.provenance,
+      },
+    });
+  }
 
   return { nodes, edges };
-}
-
-function mapEventTypeToNodeKind(type: HealthEvent["type"]): GraphNode["kind"] {
-  switch (type) {
-    case "condition":
-      return "condition";
-    case "symptom":
-      return "symptom";
-    case "medication":
-      return "medication";
-    case "lab":
-    case "vital":
-      return "lab";
-    case "encounter":
-      return "encounter";
-    case "care_task":
-      return "task";
-    case "barrier":
-      return "barrier";
-    default:
-      return "encounter";
-  }
 }
 
 function relationForEventType(type: HealthEvent["type"]): GraphEdge["relation"] {
@@ -124,131 +168,20 @@ function relationForEventType(type: HealthEvent["type"]): GraphEdge["relation"] 
   }
 }
 
-function formatNodeLabel(first: HealthEvent, group: HealthEvent[]): string {
-  if (first.type === "lab" || first.type === "vital") {
-    const latest = group[group.length - 1];
+function latestFact(group: ClinicalFact[]): ClinicalFact {
+  return [...group].sort(
+    (a, b) => new Date(b.observedAt).getTime() - new Date(a.observedAt).getTime()
+  )[0];
+}
+
+function formatEntityLabel(entity: Entity, group: ClinicalFact[]): string {
+  const latest = latestFact(group);
+  if (entity.kind === "lab") {
     if (latest.value !== undefined) {
-      return `${first.label}: ${latest.value}${latest.unit ? ` ${latest.unit}` : ""}`;
+      return `${entity.canonicalLabel}: ${latest.value}${latest.unit ? ` ${latest.unit}` : ""}`;
     }
   }
-  return first.label;
-}
-
-function findNodeByLabel(nodes: GraphNode[], pattern: RegExp): GraphNode | undefined {
-  return nodes.find((n) => pattern.test(n.label));
-}
-
-function addClinicalRelationships(
-  nodes: GraphNode[],
-  edges: GraphEdge[],
-  events: HealthEvent[]
-) {
-  const ckd = findNodeByLabel(nodes, /kidney|ckd/i);
-  const ibuprofen = findNodeByLabel(nodes, /ibuprofen/i);
-  const lisinopril = findNodeByLabel(nodes, /lisinopril/i);
-  const edema = findNodeByLabel(nodes, /swelling|edema/i);
-  const sob = findNodeByLabel(nodes, /shortness of breath/i);
-  const egfr = findNodeByLabel(nodes, /eGFR/i);
-  const potassium = findNodeByLabel(nodes, /Potassium/i);
-  const a1c = findNodeByLabel(nodes, /HbA1c|A1c/i);
-  const missedNeph = findNodeByLabel(nodes, /nephrology follow-up/i);
-  const refillDelay = findNodeByLabel(nodes, /refill delayed/i);
-
-  if (ckd && ibuprofen) {
-    edges.push({
-      id: generateId("edge"),
-      from: ibuprofen.id,
-      to: ckd.id,
-      relation: "contraindicated_with",
-      evidenceEventIds: getEventIds([ibuprofen, ckd], events),
-    });
-  }
-
-  if (ckd && egfr) {
-    edges.push({
-      id: generateId("edge"),
-      from: egfr.id,
-      to: ckd.id,
-      relation: "worsening_trend",
-      evidenceEventIds: getEventIds([egfr, ckd], events),
-    });
-  }
-
-  if (potassium && egfr) {
-    edges.push({
-      id: generateId("edge"),
-      from: potassium.id,
-      to: egfr.id,
-      relation: "possibly_related_to",
-      evidenceEventIds: getEventIds([potassium, egfr], events),
-    });
-  }
-
-  if (edema && ckd) {
-    edges.push({
-      id: generateId("edge"),
-      from: edema.id,
-      to: ckd.id,
-      relation: "possibly_related_to",
-      evidenceEventIds: getEventIds([edema, ckd], events),
-    });
-  }
-
-  if (sob && edema) {
-    edges.push({
-      id: generateId("edge"),
-      from: sob.id,
-      to: edema.id,
-      relation: "possibly_related_to",
-      evidenceEventIds: getEventIds([sob, edema], events),
-    });
-  }
-
-  if (missedNeph && ckd) {
-    edges.push({
-      id: generateId("edge"),
-      from: missedNeph.id,
-      to: ckd.id,
-      relation: "barrier_to",
-      evidenceEventIds: getEventIds([missedNeph, ckd], events),
-    });
-  }
-
-  if (refillDelay && lisinopril) {
-    edges.push({
-      id: generateId("edge"),
-      from: refillDelay.id,
-      to: lisinopril.id,
-      relation: "barrier_to",
-      evidenceEventIds: getEventIds([refillDelay, lisinopril], events),
-    });
-  }
-
-  if (a1c) {
-    const diabetes = findNodeByLabel(nodes, /diabetes/i);
-    if (diabetes) {
-      edges.push({
-        id: generateId("edge"),
-        from: a1c.id,
-        to: diabetes.id,
-        relation: "worsening_trend",
-        evidenceEventIds: getEventIds([a1c, diabetes], events),
-      });
-    }
-  }
-}
-
-function getEventIds(nodes: GraphNode[], events: HealthEvent[]): string[] {
-  const ids = new Set<string>();
-  for (const node of nodes) {
-    for (const id of node.eventIds ?? []) {
-      ids.add(id);
-    }
-  }
-  if (ids.size === 0) {
-    return events.slice(0, 3).map((e) => e.id);
-  }
-  return Array.from(ids);
+  return entity.canonicalLabel;
 }
 
 export function getEventsForNode(

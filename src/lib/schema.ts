@@ -32,6 +32,102 @@ export type HealthEvent = {
   metadata?: Record<string, unknown>;
 };
 
+export type FactRelevance = "graph" | "evidence_only" | "ignore";
+export type ReviewStatus = "accepted" | "needs_review" | "rejected" | "superseded";
+export type ExtractionMethod = "ai" | "rules" | "manual";
+export type Provenance = {
+  sourceId: string;
+  chunkId?: string;
+  quote?: string;
+  startOffset?: number;
+  endOffset?: number;
+  method: ExtractionMethod;
+  model?: string;
+  promptVersion?: string;
+};
+
+export type SourceChunk = {
+  id: string;
+  sourceId: string;
+  text: string;
+  startOffset: number;
+  endOffset: number;
+  ordinal: number;
+};
+
+export type ExtractionRun = {
+  id: string;
+  sourceId: string;
+  model: string;
+  promptVersion: string;
+  status: "completed" | "failed" | "fallback";
+  startedAt: string;
+  completedAt?: string;
+  error?: string;
+};
+
+export type CandidateFact = {
+  id: string;
+  patientId: string;
+  sourceId: string;
+  chunkId?: string;
+  kind: HealthEventType;
+  label: string;
+  normalizedLabel: string;
+  value?: string | number;
+  unit?: string;
+  observedAt: string;
+  status?: HealthEvent["status"];
+  relevance: FactRelevance;
+  confidence: number;
+  evidenceQuote?: string;
+  negated?: boolean;
+  uncertain?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+export type ClinicalFact = CandidateFact & {
+  reviewStatus: ReviewStatus;
+  provenance: Provenance[];
+  eventId: string;
+  entityId?: string;
+};
+
+export type Entity = {
+  id: string;
+  patientId: string;
+  kind: GraphNodeKind;
+  canonicalLabel: string;
+  aliases: string[];
+  confidence: number;
+  reviewStatus: ReviewStatus;
+  factIds: string[];
+  metadata?: Record<string, unknown>;
+};
+
+export type GraphRelationship = {
+  id: string;
+  patientId: string;
+  fromEntityId: string;
+  toEntityId: string;
+  relation: GraphEdgeRelation;
+  confidence: number;
+  evidenceFactIds: string[];
+  provenance: Provenance[];
+  reviewStatus: ReviewStatus;
+  metadata?: Record<string, unknown>;
+};
+
+export type ReviewItem = {
+  id: string;
+  patientId: string;
+  targetType: "fact" | "entity" | "relationship";
+  targetId: string;
+  reason: string;
+  status: "open" | "resolved";
+  createdAt: string;
+};
+
 export type GraphNodeKind =
   | "patient"
   | "condition"
@@ -51,6 +147,9 @@ export type GraphNode = {
   kind: GraphNodeKind;
   label: string;
   eventIds?: string[];
+  factIds?: string[];
+  confidence?: number;
+  reviewStatus?: ReviewStatus;
   metadata?: Record<string, unknown>;
 };
 
@@ -75,6 +174,10 @@ export type GraphEdge = {
   to: string;
   relation: GraphEdgeRelation;
   evidenceEventIds: string[];
+  evidenceFactIds?: string[];
+  confidence?: number;
+  reviewStatus?: ReviewStatus;
+  metadata?: Record<string, unknown>;
 };
 
 export type RiskAlert = {
@@ -136,8 +239,14 @@ export type ConversationContext = {
 export type IntakeState = {
   patient: PatientProfile;
   sources: Source[];
+  sourceChunks: SourceChunk[];
   events: HealthEvent[];
   contexts: ConversationContext[];
+  candidateFacts: CandidateFact[];
+  clinicalFacts: ClinicalFact[];
+  entities: Entity[];
+  graphRelationships: GraphRelationship[];
+  reviewItems: ReviewItem[];
 };
 
 export type EmrPayload = {

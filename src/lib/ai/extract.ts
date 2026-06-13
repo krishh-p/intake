@@ -1,9 +1,9 @@
 import {
-  buildExtractPrompt,
+  buildCandidateFactsPrompt,
   buildGraphPrompt,
   buildReportPrompt,
   buildRiskPrompt,
-  EXTRACT_EVENTS_SYSTEM,
+  EXTRACT_CANDIDATE_FACTS_SYSTEM,
   GRAPH_RELATIONS_SYSTEM,
   REPORT_SYSTEM,
   RISK_ENRICH_SYSTEM,
@@ -12,6 +12,8 @@ import {
 } from "@/lib/ai/prompts";
 import { grokChat, isAiConfigured, parseJsonResponse } from "@/lib/ai/xai";
 import type {
+  CandidateFact,
+  ClinicalFact,
   DoctorReport,
   GraphEdge,
   GraphEdgeRelation,
@@ -22,16 +24,24 @@ import type {
   Source,
   SourceType,
 } from "@/lib/schema";
-import { generateId } from "@/lib/utils";
+import { generateId, stableId } from "@/lib/utils";
 import { generateReport } from "@/lib/reports/generateReport";
+import { acceptCandidate, healthEventFromFact } from "@/lib/knowledge/facts";
+import { normalizeLabel } from "@/lib/knowledge/normalize";
 
-type ExtractedEvent = {
-  type: string;
+type ExtractedCandidateFact = {
+  kind: string;
   label: string;
+  normalizedLabel?: string;
   value?: string | number;
   unit?: string;
+  observedAt?: string;
   status?: string;
-  metadata?: Record<string, unknown>;
+  relevance?: string;
+  confidence?: number;
+  evidenceQuote?: string;
+  negated?: boolean;
+  uncertain?: boolean;
 };
 
 type AiRelationship = {
@@ -60,36 +70,101 @@ export async function aiExtractEvents(
   sourceId: string,
   patientName: string
 ): Promise<HealthEvent[]> {
+  const candidateFacts = await aiExtractCandidateFacts(
+    text,
+    sourceType,
+    patientId,
+    sourceId,
+    patientName
+  );
+  const now = new Date().toISOString();
+  const source: Source = {
+    id: sourceId,
+    type: sourceType,
+    title: sourceType,
+    capturedAt: now,
+    rawText: text,
+  };
+  const acceptedFacts: ClinicalFact[] = [];
+  const events: HealthEvent[] = [];
+
+  for (const candidate of candidateFacts) {
+    const eventId = stableId("evt", `${sourceId}:${candidate.kind}:${candidate.normalizedLabel}:${candidate.observedAt}:${String(candidate.value ?? "")}`);
+    const accepted = acceptCandidate(candidate, eventId, source);
+    if (accepted.fact) acceptedFacts.push(accepted.fact);
+  }
+
+  for (const fact of acceptedFacts) {
+    if (fact.relevance !== "ignore") events.push(healthEventFromFact(fact));
+  }
+
+  return events;
+}
+
+export async function aiExtractCandidateFacts(
+  text: string,
+  sourceType: SourceType,
+  patientId: string,
+  sourceId: string,
+  patientName: string
+): Promise<CandidateFact[]> {
   const raw = await grokChat(
     [
-      { role: "system", content: EXTRACT_EVENTS_SYSTEM },
+      { role: "system", content: EXTRACT_CANDIDATE_FACTS_SYSTEM },
       {
         role: "user",
-        content: buildExtractPrompt(text, sourceType, patientName),
+        content: buildCandidateFactsPrompt(text, sourceType, patientName),
       },
     ],
     { json: true }
   );
 
-  const parsed = parseJsonResponse<{ events: ExtractedEvent[] }>(raw);
+  const parsed = parseJsonResponse<{ facts: ExtractedCandidateFact[] }>(raw);
   const now = new Date().toISOString();
 
-  return (parsed.events ?? [])
-    .filter((e) => e.label && VALID_EVENT_TYPES.includes(e.type as HealthEvent["type"]))
-    .map((e) => ({
-      id: generateId("evt"),
-      patientId,
-      sourceId,
-      type: e.type as HealthEvent["type"],
-      label: e.label,
-      value: e.value,
-      unit: e.unit,
-      observedAt: now,
-      status: (["active", "resolved", "unknown"].includes(e.status ?? "")
-        ? e.status
-        : "active") as HealthEvent["status"],
-      metadata: { ...e.metadata, aiExtracted: true },
-    }));
+  return (parsed.facts ?? [])
+    .filter((fact) => fact.label && VALID_EVENT_TYPES.includes(fact.kind as HealthEvent["type"]))
+    .map((fact) => {
+      const kind = fact.kind as HealthEvent["type"];
+      const normalizedLabel = fact.normalizedLabel?.trim()
+        ? normalizeLabel(fact.normalizedLabel)
+        : normalizeLabel(fact.label);
+      const observedAt =
+        fact.observedAt && !Number.isNaN(new Date(fact.observedAt).getTime())
+          ? new Date(fact.observedAt).toISOString()
+          : now;
+      const relevance = ["graph", "evidence_only", "ignore"].includes(fact.relevance ?? "")
+        ? (fact.relevance as CandidateFact["relevance"])
+        : "evidence_only";
+
+      return {
+        id: stableId("cand", `${sourceId}:${kind}:${normalizedLabel}:${observedAt}:${String(fact.value ?? "")}`),
+        patientId,
+        sourceId,
+        kind,
+        label: fact.label,
+        normalizedLabel,
+        value: fact.value,
+        unit: fact.unit,
+        observedAt,
+        status: (["active", "resolved", "unknown"].includes(fact.status ?? "")
+          ? fact.status
+          : "active") as HealthEvent["status"],
+        relevance,
+        confidence:
+          typeof fact.confidence === "number"
+            ? Math.max(0, Math.min(1, fact.confidence))
+            : 0.65,
+        evidenceQuote: fact.evidenceQuote,
+        negated: fact.negated ?? false,
+        uncertain: fact.uncertain ?? false,
+        metadata: {
+          aiExtracted: true,
+          model: "grok",
+          promptVersion: "candidate-facts-v1",
+        },
+      };
+    });
 }
 
 export async function aiExtractRelationships(

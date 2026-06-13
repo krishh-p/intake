@@ -17,6 +17,14 @@ export function generateId(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
+export function stableId(prefix: string, input: string) {
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = (hash * 31 + input.charCodeAt(i)) >>> 0;
+  }
+  return `${prefix}_${hash.toString(36)}`;
+}
+
 export function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", {
     month: "short",

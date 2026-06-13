@@ -123,7 +123,7 @@ export class GrokVoiceSession {
     this.sourceNode = this.audioContext.createMediaStreamSource(stream);
     const processor = this.audioContext.createScriptProcessor(4096, 1, 1);
 
-    let audioBuffer: Float32Array[] = [];
+    const audioBuffer: Float32Array[] = [];
     let totalSamples = 0;
     const chunkSizeSamples = (this.audioContext.sampleRate * CHUNK_DURATION_MS) / 1000;
 

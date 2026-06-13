@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import type { AuthUser } from "@/lib/auth/types";
+import { getBrowserSupabase } from "@/lib/supabase/client";
 import {
   clearSession,
   createSession,
@@ -33,20 +34,69 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+function authUserFromSupabase(user: {
+  id: string;
+  email?: string;
+  user_metadata?: Record<string, unknown>;
+}): AuthUser {
+  return {
+    id: user.id,
+    email: user.email ?? "",
+    name: typeof user.user_metadata?.name === "string" ? user.user_metadata.name : "Patient",
+    dob: typeof user.user_metadata?.dob === "string" ? user.user_metadata.dob : "",
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const session = getSession();
-    if (session) {
-      const found = getUserById(session.userId);
+    let active = true;
+    const supabase = getBrowserSupabase();
+
+    async function hydrate() {
+      if (supabase) {
+        const {
+          data: { user: supabaseUser },
+        } = await supabase.auth.getUser();
+        if (!active) return;
+        setUser(supabaseUser ? authUserFromSupabase(supabaseUser) : null);
+        setLoading(false);
+        return;
+      }
+
+      const session = getSession();
+      const found = session ? getUserById(session.userId) : null;
+      if (!active) return;
       setUser(found);
+      setLoading(false);
     }
-    setLoading(false);
+
+    hydrate();
+    const subscription = supabase?.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ? authUserFromSupabase(session.user) : null);
+      setLoading(false);
+    });
+
+    return () => {
+      active = false;
+      subscription?.data.subscription.unsubscribe();
+    };
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
+    const supabase = getBrowserSupabase();
+    if (supabase) {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (error) throw new Error(error.message);
+      if (data.user) setUser(authUserFromSupabase(data.user));
+      return;
+    }
+
     const authUser = await loginUser(email, password);
     createSession(authUser.id);
     setUser(authUser);
@@ -59,6 +109,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       name: string;
       dob: string;
     }) => {
+      const supabase = getBrowserSupabase();
+      if (supabase) {
+        const { data, error } = await supabase.auth.signUp({
+          email: input.email,
+          password: input.password,
+          options: {
+            data: {
+              name: input.name.trim(),
+              dob: input.dob,
+            },
+          },
+        });
+        if (error) throw new Error(error.message);
+        const supabaseUser = data.user;
+        if (!supabaseUser) {
+          throw new Error("Check your email to finish creating your account.");
+        }
+
+        await supabase.from("profiles").upsert({
+          id: supabaseUser.id,
+          email: supabaseUser.email,
+          name: input.name.trim(),
+          dob: input.dob,
+        });
+        setUser(authUserFromSupabase(supabaseUser));
+        return;
+      }
+
       const authUser = await registerUser(input);
       createSession(authUser.id);
       setUser(authUser);
@@ -67,6 +145,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    const supabase = getBrowserSupabase();
+    if (supabase) {
+      void supabase.auth.signOut();
+    }
     clearSession();
     setUser(null);
   }, []);

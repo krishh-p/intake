@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
-import { aiExtractRelationships, isAiConfigured } from "@/lib/ai/extract";
-import { buildGraph } from "@/lib/graph/buildGraph";
-import type { ConversationContext, GraphEdge, HealthEvent, Source } from "@/lib/schema";
+import { buildGraphFromKnowledge } from "@/lib/graph/buildGraph";
+import { buildKnowledgeFromEvents } from "@/lib/knowledge/facts";
+import { buildKnowledgeRelationships } from "@/lib/knowledge/relationships";
+import type { ConversationContext, HealthEvent, Source } from "@/lib/schema";
 
 export async function POST(request: Request) {
   try {
@@ -25,20 +26,27 @@ export async function POST(request: Request) {
       );
     }
 
-    const baseGraph = buildGraph(patientName, events, sources ?? [], contexts ?? []);
-    let aiEdges: GraphEdge[] = [];
-
-    if (isAiConfigured() && events.length >= 2) {
-      aiEdges = await aiExtractRelationships(events, baseGraph.nodes);
-    }
-
-    const mergedEdges = mergeEdges(baseGraph.edges, aiEdges);
+    const knowledge = buildKnowledgeFromEvents(sources ?? [], events);
+    const relationshipResult = buildKnowledgeRelationships(
+      events[0]?.patientId ?? "patient",
+      knowledge.entities,
+      knowledge.clinicalFacts
+    );
+    const graph = buildGraphFromKnowledge(
+      patientName,
+      sources ?? [],
+      knowledge.clinicalFacts,
+      knowledge.entities,
+      relationshipResult.relationships,
+      contexts ?? [],
+      events
+    );
 
     return NextResponse.json({
-      nodes: baseGraph.nodes,
-      edges: mergedEdges,
-      aiEdgeCount: aiEdges.length,
-      method: aiEdges.length > 0 ? "ai+rules" : "rules",
+      nodes: graph.nodes,
+      edges: graph.edges,
+      reviewCount: relationshipResult.reviewItems.length + knowledge.reviewItems.length,
+      method: "facts+rules",
     });
   } catch (error) {
     console.error("Graph analyze error:", error);
@@ -47,17 +55,4 @@ export async function POST(request: Request) {
       { status: 500 }
     );
   }
-}
-
-function mergeEdges(base: GraphEdge[], ai: GraphEdge[]): GraphEdge[] {
-  const seen = new Set(base.map((e) => `${e.from}|${e.to}|${e.relation}`));
-  const merged = [...base];
-  for (const edge of ai) {
-    const key = `${edge.from}|${edge.to}|${edge.relation}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      merged.push(edge);
-    }
-  }
-  return merged;
 }

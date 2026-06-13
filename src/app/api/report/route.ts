@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import {
-  aiEnrichAlerts,
   aiGenerateReport,
   isAiConfigured,
   mergeReportWithTemplate,

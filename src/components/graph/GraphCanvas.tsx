@@ -164,7 +164,15 @@ export function GraphCanvas() {
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
   const detailEvents = selectedNode ? getEventsForNode(selectedNode, state.events) : [];
   const activeId = selectedNodeId ?? hoveredId;
-  const clinicalEdges = edges.filter((e) => e.relation !== "mentioned_in");
+  const visibleEdges = edges.filter(
+    (edge) =>
+      edge.relation === "mentioned_in" ||
+      edge.confidence === undefined ||
+      edge.confidence >= 0.5 ||
+      activeId === edge.from ||
+      activeId === edge.to
+  );
+  const clinicalEdges = visibleEdges.filter((e) => e.relation !== "mentioned_in");
   const hasGraph = graph.nodes.length > 1;
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -276,7 +284,7 @@ export function GraphCanvas() {
             >
               <rect width="100%" height="100%" fill="#f8f7f4" />
               <g transform={`translate(${transform.x},${transform.y}) scale(${transform.scale})`}>
-                {edges.map((edge) => {
+                {visibleEdges.map((edge) => {
                   const from = positions.get(edge.from);
                   const to = positions.get(edge.to);
                   if (!from || !to) return null;
@@ -399,6 +407,18 @@ export function GraphCanvas() {
               {KIND_LABELS[selectedNode.kind] ?? selectedNode.kind}
             </p>
             <h2 className="mt-1 font-display text-lg text-ink">{selectedNode.label}</h2>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {selectedNode.confidence !== undefined && (
+                <span className="border border-line px-2 py-0.5 font-mono-data text-[10px] text-ink-faint">
+                  {Math.round(selectedNode.confidence * 100)}% confidence
+                </span>
+              )}
+              {selectedNode.reviewStatus && (
+                <span className="border border-line px-2 py-0.5 text-[10px] text-ink-faint">
+                  {selectedNode.reviewStatus.replace("_", " ")}
+                </span>
+              )}
+            </div>
 
             {selectedNode.kind === "conversation" && (
               <ConversationDetail metadata={selectedNode.metadata} />
@@ -426,6 +446,16 @@ export function GraphCanvas() {
                             {sourceTypeLabel(src.type)}
                           </span>
                         )}
+                        {typeof evt.metadata?.evidenceQuote === "string" && (
+                          <blockquote className="mt-2 border-l-2 border-line pl-2 text-xs leading-relaxed text-ink-muted">
+                            {evt.metadata.evidenceQuote}
+                          </blockquote>
+                        )}
+                        {typeof evt.metadata?.confidence === "number" && (
+                          <p className="mt-2 font-mono-data text-[10px] text-ink-faint">
+                            Fact confidence {Math.round(evt.metadata.confidence * 100)}%
+                          </p>
+                        )}
                       </li>
                     );
                   })}
@@ -445,8 +475,10 @@ export function GraphCanvas() {
 
         {hoveredEdge && (
           <div className="pointer-events-none absolute top-20 left-1/2 -translate-x-1/2 border border-line bg-surface px-3 py-1.5 text-xs text-ink-muted shadow-sm">
-            {RELATION_LABELS[edges.find((e) => e.id === hoveredEdge)?.relation ?? ""] ??
-              edges.find((e) => e.id === hoveredEdge)?.relation}
+            {RELATION_LABELS[visibleEdges.find((e) => e.id === hoveredEdge)?.relation ?? ""] ??
+              visibleEdges.find((e) => e.id === hoveredEdge)?.relation}
+            {visibleEdges.find((e) => e.id === hoveredEdge)?.confidence !== undefined &&
+              ` · ${Math.round((visibleEdges.find((e) => e.id === hoveredEdge)?.confidence ?? 0) * 100)}%`}
           </div>
         )}
       </div>

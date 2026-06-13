@@ -49,7 +49,10 @@ export function ReportPanel({ variant = "full" }: { variant?: "compact" | "full"
   }, [specialty, state, alerts]);
 
   useEffect(() => {
-    fetchReport();
+    const timer = window.setTimeout(() => {
+      void fetchReport();
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [fetchReport]);
 
   async function handleCopy() {

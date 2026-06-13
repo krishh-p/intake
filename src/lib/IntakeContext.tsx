@@ -12,7 +12,6 @@ import {
 } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import {
-  analyzeGraph,
   analyzeRisk,
   checkAiHealth,
   doctorNoteToText,
@@ -21,8 +20,16 @@ import {
 } from "@/lib/api/client";
 import { parseEmrFile } from "@/lib/ingest/emrParser";
 import { type DoctorNoteInput } from "@/lib/ingest/doctorNoteParser";
-import { buildGraph } from "@/lib/graph/buildGraph";
+import { buildGraphFromKnowledge } from "@/lib/graph/buildGraph";
 import { queryGraph, searchEvidenceForAlert } from "@/lib/graph/queryGraph";
+import { buildKnowledgeFromEvents } from "@/lib/knowledge/facts";
+import { buildKnowledgeRelationships } from "@/lib/knowledge/relationships";
+import {
+  clearRemoteWorkspace,
+  loadRemoteWorkspace,
+  saveRemoteKnowledge,
+} from "@/lib/supabase/workspace";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 import {
   buildEvidenceIndex,
   type EvidenceIndex,
@@ -70,7 +77,6 @@ type IntakeContextValue = {
 };
 
 const IntakeContext = createContext<IntakeContextValue | null>(null);
-const emptyIndex = buildEvidenceIndex([], []);
 
 export function IntakeProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
@@ -95,44 +101,57 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
   const [aiConfigured, setAiConfigured] = useState(false);
   const analyzeSeq = useRef(0);
 
-  const state: IntakeState = useMemo(
-    () => ({
-      patient: { id: user!.id, name: user!.name, dob: user!.dob },
-      sources,
-      events,
-      contexts,
-    }),
-    [user, sources, events, contexts]
-  );
-
   useEffect(() => {
     if (!user) return;
-    try {
-      const raw = localStorage.getItem(workspaceKey(user.id));
-      if (raw) {
-        const ws = JSON.parse(raw) as {
-          sources: Source[];
-          events: HealthEvent[];
-          contexts?: ConversationContext[];
-        };
-        setSources(ws.sources ?? []);
-        setEvents(ws.events ?? []);
-        setContexts(ws.contexts ?? []);
-      } else {
+    let active = true;
+
+    async function hydrateWorkspace() {
+      try {
+        if (isSupabaseConfigured()) {
+          const remote = await loadRemoteWorkspace(user!.id);
+          if (!active) return;
+          setSources(remote.sources);
+          setEvents(remote.events);
+          setContexts([]);
+          setHydrated(true);
+          return;
+        }
+
+        const raw = localStorage.getItem(workspaceKey(user!.id));
+        if (raw) {
+          const ws = JSON.parse(raw) as {
+            sources: Source[];
+            events: HealthEvent[];
+            contexts?: ConversationContext[];
+          };
+          if (!active) return;
+          setSources(ws.sources ?? []);
+          setEvents(ws.events ?? []);
+          setContexts(ws.contexts ?? []);
+        } else {
+          if (!active) return;
+          setSources([]);
+          setEvents([]);
+          setContexts([]);
+        }
+      } catch {
+        if (!active) return;
         setSources([]);
         setEvents([]);
         setContexts([]);
       }
-    } catch {
-      setSources([]);
-      setEvents([]);
-      setContexts([]);
+      setHydrated(true);
     }
-    setHydrated(true);
-  }, [user?.id]);
+
+    hydrateWorkspace();
+    return () => {
+      active = false;
+    };
+  }, [user]);
 
   useEffect(() => {
     if (!hydrated || !user) return;
+    if (isSupabaseConfigured()) return;
     localStorage.setItem(
       workspaceKey(user.id),
       JSON.stringify({ sources, events, contexts })
@@ -149,6 +168,62 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
   );
   const indexStats = useMemo(() => evidenceIndex.getStats(), [evidenceIndex]);
 
+  const knowledge = useMemo(() => buildKnowledgeFromEvents(sources, events), [sources, events]);
+  const relationshipResult = useMemo(
+    () =>
+      buildKnowledgeRelationships(
+        user?.id ?? "patient",
+        knowledge.entities,
+        knowledge.clinicalFacts
+      ),
+    [user, knowledge.entities, knowledge.clinicalFacts]
+  );
+  const knowledgeReviewItems = useMemo(
+    () => [...knowledge.reviewItems, ...relationshipResult.reviewItems],
+    [knowledge.reviewItems, relationshipResult.reviewItems]
+  );
+
+  const derivedState: IntakeState = useMemo(
+    () => ({
+      patient: { id: user!.id, name: user!.name, dob: user!.dob },
+      sources,
+      sourceChunks: knowledge.sourceChunks,
+      events,
+      contexts,
+      candidateFacts: knowledge.candidateFacts,
+      clinicalFacts: knowledge.clinicalFacts,
+      entities: knowledge.entities,
+      graphRelationships: relationshipResult.relationships,
+      reviewItems: knowledgeReviewItems,
+    }),
+    [user, sources, events, contexts, knowledge, relationshipResult.relationships, knowledgeReviewItems]
+  );
+
+  useEffect(() => {
+    if (!hydrated || !user || !isSupabaseConfigured()) return;
+    if (sources.length === 0 && events.length === 0) return;
+    saveRemoteKnowledge({
+      userId: user.id,
+      sources,
+      sourceChunks: knowledge.sourceChunks,
+      candidateFacts: knowledge.candidateFacts,
+      clinicalFacts: knowledge.clinicalFacts,
+      entities: knowledge.entities,
+      graphRelationships: relationshipResult.relationships,
+      reviewItems: knowledgeReviewItems,
+    }).catch((err) => {
+      setError(err instanceof Error ? err.message : "Supabase sync failed");
+    });
+  }, [
+    hydrated,
+    user,
+    sources,
+    events,
+    knowledge,
+    relationshipResult.relationships,
+    knowledgeReviewItems,
+  ]);
+
   const reanalyze = useCallback(
     async (
       evts: HealthEvent[],
@@ -159,9 +234,24 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
       const seq = ++analyzeSeq.current;
       setProcessing({ active: true, message: "Building knowledge graph" });
       try {
-        const graphResult = await analyzeGraph(patientName, evts, srcs, ctxs);
+        const knowledgeResult = buildKnowledgeFromEvents(srcs, evts);
+        const relResult = buildKnowledgeRelationships(
+          evts[0]?.patientId ?? user?.id ?? "patient",
+          knowledgeResult.entities,
+          knowledgeResult.clinicalFacts
+        );
         if (seq !== analyzeSeq.current) return;
-        setGraph({ nodes: graphResult.nodes, edges: graphResult.edges });
+        setGraph(
+          buildGraphFromKnowledge(
+            patientName,
+            srcs,
+            knowledgeResult.clinicalFacts,
+            knowledgeResult.entities,
+            relResult.relationships,
+            ctxs,
+            evts
+          )
+        );
         setProcessing({ active: true, message: "Evaluating risk patterns" });
         const riskResult = await analyzeRisk(evts);
         if (seq !== analyzeSeq.current) return;
@@ -169,22 +259,43 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
         setProcessing({ active: false, message: "" });
       } catch (err) {
         if (seq !== analyzeSeq.current) return;
-        setGraph(buildGraph(patientName, evts, srcs, ctxs));
+        const knowledgeResult = buildKnowledgeFromEvents(srcs, evts);
+        const relResult = buildKnowledgeRelationships(
+          evts[0]?.patientId ?? user?.id ?? "patient",
+          knowledgeResult.entities,
+          knowledgeResult.clinicalFacts
+        );
+        setGraph(
+          buildGraphFromKnowledge(
+            patientName,
+            srcs,
+            knowledgeResult.clinicalFacts,
+            knowledgeResult.entities,
+            relResult.relationships,
+            ctxs,
+            evts
+          )
+        );
         setAlerts(evaluateRiskRules(evts));
         setProcessing({ active: false, message: "" });
         setError(err instanceof Error ? err.message : "Analysis unavailable");
       }
     },
-    []
+    [user]
   );
 
   useEffect(() => {
     if (!user || events.length === 0) {
-      setGraph({ nodes: [], edges: [] });
-      setAlerts([]);
-      return;
+      const timer = window.setTimeout(() => {
+        setGraph({ nodes: [], edges: [] });
+        setAlerts([]);
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
-    reanalyze(events, sources, contexts, user.name);
+    const timer = window.setTimeout(() => {
+      void reanalyze(events, sources, contexts, user.name);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [events, sources, contexts, user, reanalyze]);
 
   const appendConversation = useCallback(
@@ -309,6 +420,9 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
         workspaceKey(user.id),
         JSON.stringify({ sources: [], events: [], contexts: [] })
       );
+      clearRemoteWorkspace(user.id).catch((err) => {
+        setError(err instanceof Error ? err.message : "Failed to clear remote workspace");
+      });
     }
   }, [user]);
 
@@ -359,7 +473,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
   return (
     <IntakeContext.Provider
       value={{
-        state,
+        state: derivedState,
         graph,
         displayGraph,
         alerts,
