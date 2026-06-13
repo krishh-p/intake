@@ -53,7 +53,11 @@ type ProcessingState = { active: boolean; message: string };
 type IntakeContextValue = {
   state: IntakeState;
   graph: { nodes: GraphNode[]; edges: GraphEdge[] };
-  displayGraph: { nodes: GraphNode[]; edges: GraphEdge[]; focusEventIds: Set<string> };
+  displayGraph: {
+    nodes: GraphNode[];
+    edges: GraphEdge[];
+    focusEventIds: Set<string>;
+  };
   alerts: RiskAlert[];
   evidenceIndex: EvidenceIndex;
   evidenceForAlert: SearchResult[];
@@ -85,14 +89,19 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
   const [contexts, setContexts] = useState<ConversationContext[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
-  const [graph, setGraph] = useState<{ nodes: GraphNode[]; edges: GraphEdge[] }>({
+  const [graph, setGraph] = useState<{
+    nodes: GraphNode[];
+    edges: GraphEdge[];
+  }>({
     nodes: [],
     edges: [],
   });
   const [alerts, setAlerts] = useState<RiskAlert[]>([]);
   const [selectedAlertId, setSelectedAlertId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [graphFilterMode, setGraphFilterMode] = useState<"full" | "evidence">("full");
+  const [graphFilterMode, setGraphFilterMode] = useState<"full" | "evidence">(
+    "full",
+  );
   const [processing, setProcessing] = useState<ProcessingState>({
     active: false,
     message: "",
@@ -154,7 +163,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
     if (isSupabaseConfigured()) return;
     localStorage.setItem(
       workspaceKey(user.id),
-      JSON.stringify({ sources, events, contexts })
+      JSON.stringify({ sources, events, contexts }),
     );
   }, [sources, events, contexts, user, hydrated]);
 
@@ -164,23 +173,26 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
 
   const evidenceIndex = useMemo(
     () => buildEvidenceIndex(sources, events),
-    [sources, events]
+    [sources, events],
   );
   const indexStats = useMemo(() => evidenceIndex.getStats(), [evidenceIndex]);
 
-  const knowledge = useMemo(() => buildKnowledgeFromEvents(sources, events), [sources, events]);
+  const knowledge = useMemo(
+    () => buildKnowledgeFromEvents(sources, events),
+    [sources, events],
+  );
   const relationshipResult = useMemo(
     () =>
       buildKnowledgeRelationships(
         user?.id ?? "patient",
         knowledge.entities,
-        knowledge.clinicalFacts
+        knowledge.clinicalFacts,
       ),
-    [user, knowledge.entities, knowledge.clinicalFacts]
+    [user, knowledge.entities, knowledge.clinicalFacts],
   );
   const knowledgeReviewItems = useMemo(
     () => [...knowledge.reviewItems, ...relationshipResult.reviewItems],
-    [knowledge.reviewItems, relationshipResult.reviewItems]
+    [knowledge.reviewItems, relationshipResult.reviewItems],
   );
 
   const derivedState: IntakeState = useMemo(
@@ -196,7 +208,15 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
       graphRelationships: relationshipResult.relationships,
       reviewItems: knowledgeReviewItems,
     }),
-    [user, sources, events, contexts, knowledge, relationshipResult.relationships, knowledgeReviewItems]
+    [
+      user,
+      sources,
+      events,
+      contexts,
+      knowledge,
+      relationshipResult.relationships,
+      knowledgeReviewItems,
+    ],
   );
 
   useEffect(() => {
@@ -229,7 +249,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
       evts: HealthEvent[],
       srcs: Source[],
       ctxs: ConversationContext[],
-      patientName: string
+      patientName: string,
     ) => {
       const seq = ++analyzeSeq.current;
       setProcessing({ active: true, message: "Building knowledge graph" });
@@ -238,7 +258,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
         const relResult = buildKnowledgeRelationships(
           evts[0]?.patientId ?? user?.id ?? "patient",
           knowledgeResult.entities,
-          knowledgeResult.clinicalFacts
+          knowledgeResult.clinicalFacts,
         );
         if (seq !== analyzeSeq.current) return;
         setGraph(
@@ -249,8 +269,8 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
             knowledgeResult.entities,
             relResult.relationships,
             ctxs,
-            evts
-          )
+            evts,
+          ),
         );
         setProcessing({ active: true, message: "Evaluating risk patterns" });
         const riskResult = await analyzeRisk(evts);
@@ -263,7 +283,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
         const relResult = buildKnowledgeRelationships(
           evts[0]?.patientId ?? user?.id ?? "patient",
           knowledgeResult.entities,
-          knowledgeResult.clinicalFacts
+          knowledgeResult.clinicalFacts,
         );
         setGraph(
           buildGraphFromKnowledge(
@@ -273,15 +293,15 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
             knowledgeResult.entities,
             relResult.relationships,
             ctxs,
-            evts
-          )
+            evts,
+          ),
         );
         setAlerts(evaluateRiskRules(evts));
         setProcessing({ active: false, message: "" });
         setError(err instanceof Error ? err.message : "Analysis unavailable");
       }
     },
-    [user]
+    [user],
   );
 
   useEffect(() => {
@@ -299,18 +319,25 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
   }, [events, sources, contexts, user, reanalyze]);
 
   const appendConversation = useCallback(
-    (source: Source, newEvents: HealthEvent[], context: ConversationContext) => {
+    (
+      source: Source,
+      newEvents: HealthEvent[],
+      context: ConversationContext,
+    ) => {
       setSources((prev) => [...prev, source]);
       setEvents((prev) => [...prev, ...newEvents]);
       setContexts((prev) => [...prev, context]);
     },
-    []
+    [],
   );
 
-  const appendIngestion = useCallback((source: Source, newEvents: HealthEvent[]) => {
-    setSources((prev) => [...prev, source]);
-    setEvents((prev) => [...prev, ...newEvents]);
-  }, []);
+  const appendIngestion = useCallback(
+    (source: Source, newEvents: HealthEvent[]) => {
+      setSources((prev) => [...prev, source]);
+      setEvents((prev) => [...prev, ...newEvents]);
+    },
+    [],
+  );
 
   const importEmrFileHandler = useCallback(
     async (file: File) => {
@@ -326,7 +353,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
         setProcessing({ active: false, message: "" });
       }
     },
-    [user, appendIngestion]
+    [user, appendIngestion],
   );
 
   const addVoiceNote = useCallback(
@@ -334,7 +361,9 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
       if (!user) return;
       const text = transcript.trim();
       if (text.length < 10) {
-        setError("Provide at least a few sentences about symptoms, medications, or concerns.");
+        setError(
+          "Provide at least a few sentences about symptoms, medications, or concerns.",
+        );
         return;
       }
       setError(null);
@@ -343,12 +372,14 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
         const result = await extractFromText(text, "voice", user.id, user.name);
         appendIngestion(result.source, result.events);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Voice note processing failed");
+        setError(
+          err instanceof Error ? err.message : "Voice note processing failed",
+        );
       } finally {
         setProcessing({ active: false, message: "" });
       }
     },
-    [user, appendIngestion]
+    [user, appendIngestion],
   );
 
   const completeIntakeConversation = useCallback(
@@ -359,17 +390,26 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
         return;
       }
       setError(null);
-      setProcessing({ active: true, message: "Parsing conversation for graph" });
+      setProcessing({
+        active: true,
+        message: "Parsing conversation for graph",
+      });
       try {
-        const result = await finalizeIntakeConversation(messages, user.id, user.name);
+        const result = await finalizeIntakeConversation(
+          messages,
+          user.id,
+          user.name,
+        );
         appendConversation(result.source, result.events, result.context);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Conversation save failed");
+        setError(
+          err instanceof Error ? err.message : "Conversation save failed",
+        );
       } finally {
         setProcessing({ active: false, message: "" });
       }
     },
-    [user, appendConversation]
+    [user, appendConversation],
   );
 
   const submitDoctorNote = useCallback(
@@ -386,14 +426,14 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
           doctorNoteToText(input),
           "doctor_note",
           user.id,
-          user.name
+          user.name,
         );
         appendIngestion(
           {
             ...result.source,
             title: `${input.clinicianName} — ${input.specialty || "Clinical note"}`,
           },
-          result.events
+          result.events,
         );
       } catch (err) {
         setError(err instanceof Error ? err.message : "Note processing failed");
@@ -401,7 +441,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
         setProcessing({ active: false, message: "" });
       }
     },
-    [user, appendIngestion]
+    [user, appendIngestion],
   );
 
   const clearWorkspace = useCallback(() => {
@@ -418,10 +458,14 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
     if (user) {
       localStorage.setItem(
         workspaceKey(user.id),
-        JSON.stringify({ sources: [], events: [], contexts: [] })
+        JSON.stringify({ sources: [], events: [], contexts: [] }),
       );
       clearRemoteWorkspace(user.id).catch((err) => {
-        setError(err instanceof Error ? err.message : "Failed to clear remote workspace");
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to clear remote workspace",
+        );
       });
     }
   }, [user]);
@@ -442,7 +486,11 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
     if (selectedNodeId) {
       return queryGraph(graph.nodes, graph.edges, { nodeId: selectedNodeId });
     }
-    return { nodes: graph.nodes, edges: graph.edges, focusEventIds: new Set<string>() };
+    return {
+      nodes: graph.nodes,
+      edges: graph.edges,
+      focusEventIds: new Set<string>(),
+    };
   }, [graph, graphFilterMode, selectedAlert, selectedNodeId]);
 
   const highlightedEventIds = useMemo(() => {
@@ -451,10 +499,18 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
     evidenceForAlert.forEach((r) => {
       if (r.document.eventId) ids.add(r.document.eventId);
     });
-    graph.nodes.find((n) => n.id === selectedNodeId)?.eventIds?.forEach((id) => ids.add(id));
+    graph.nodes
+      .find((n) => n.id === selectedNodeId)
+      ?.eventIds?.forEach((id) => ids.add(id));
     displayGraph.focusEventIds.forEach((id) => ids.add(id));
     return ids;
-  }, [selectedAlert, selectedNodeId, graph.nodes, evidenceForAlert, displayGraph]);
+  }, [
+    selectedAlert,
+    selectedNodeId,
+    graph.nodes,
+    evidenceForAlert,
+    displayGraph,
+  ]);
 
   const selectAlert = useCallback((id: string | null) => {
     setSelectedAlertId(id);

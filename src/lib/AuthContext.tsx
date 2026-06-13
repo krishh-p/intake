@@ -42,8 +42,12 @@ function authUserFromSupabase(user: {
   return {
     id: user.id,
     email: user.email ?? "",
-    name: typeof user.user_metadata?.name === "string" ? user.user_metadata.name : "Patient",
-    dob: typeof user.user_metadata?.dob === "string" ? user.user_metadata.dob : "",
+    name:
+      typeof user.user_metadata?.name === "string"
+        ? user.user_metadata.name
+        : "Patient",
+    dob:
+      typeof user.user_metadata?.dob === "string" ? user.user_metadata.dob : "",
   };
 }
 
@@ -141,7 +145,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       createSession(authUser.id);
       setUser(authUser);
     },
-    []
+    [],
   );
 
   const logout = useCallback(() => {

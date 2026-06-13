@@ -1,6 +1,6 @@
 "use client";
 
-import { getBrowserSupabase } from "@/lib/supabase/client";
+import { getAuthenticatedSupabase } from "@/lib/supabase/client";
 import type {
   CandidateFact,
   ClinicalFact,
@@ -35,13 +35,18 @@ export async function loadRemoteWorkspace(userId: string): Promise<{
   sources: Source[];
   events: HealthEvent[];
 }> {
-  const supabase = getBrowserSupabase();
-  if (!supabase) return { sources: [], events: [] };
+  const auth = await getAuthenticatedSupabase();
+  if (!auth) return { sources: [], events: [] };
+  if (auth.userId !== userId) {
+    throw new Error("Signed-in account does not match the active workspace user.");
+  }
+
+  const { supabase } = auth;
 
   const [{ data: sourceRows, error: sourcesError }, { data: factRows, error: factsError }] =
     await Promise.all([
-      supabase.from("sources").select("*").eq("user_id", userId).order("captured_at"),
-      supabase.from("clinical_facts").select("*").eq("user_id", userId).order("observed_at"),
+      supabase.from("sources").select("*").eq("user_id", auth.userId).order("captured_at"),
+      supabase.from("clinical_facts").select("*").eq("user_id", auth.userId).order("observed_at"),
     ]);
 
   if (sourcesError) throw new Error(sourcesError.message);
@@ -87,14 +92,19 @@ export async function saveRemoteKnowledge(input: {
   graphRelationships: GraphRelationship[];
   reviewItems: ReviewItem[];
 }) {
-  const supabase = getBrowserSupabase();
-  if (!supabase) return;
+  const auth = await getAuthenticatedSupabase();
+  if (!auth) return;
+  if (auth.userId !== input.userId) {
+    throw new Error("Signed-in account does not match the active workspace user.");
+  }
+
+  const { supabase, userId } = auth;
 
   const sourceIds = new Set(input.sources.map((source) => source.id));
 
   const sourceRows = input.sources.map((source) => ({
     id: source.id,
-    user_id: input.userId,
+    user_id: userId,
     type: source.type,
     title: source.title,
     captured_at: source.capturedAt,
@@ -105,7 +115,7 @@ export async function saveRemoteKnowledge(input: {
     .filter((chunk) => sourceIds.has(chunk.sourceId))
     .map((chunk) => ({
     id: chunk.id,
-    user_id: input.userId,
+    user_id: userId,
     source_id: chunk.sourceId,
     ordinal: chunk.ordinal,
     start_offset: chunk.startOffset,
@@ -119,7 +129,7 @@ export async function saveRemoteKnowledge(input: {
     .filter((fact) => sourceIds.has(fact.sourceId))
     .map((fact) => ({
     id: fact.id,
-    user_id: input.userId,
+    user_id: userId,
     source_id: fact.sourceId,
     chunk_id: fact.chunkId && chunkIds.has(fact.chunkId) ? fact.chunkId : null,
     kind: fact.kind,
@@ -140,7 +150,7 @@ export async function saveRemoteKnowledge(input: {
     .filter((fact) => sourceIds.has(fact.sourceId))
     .map((fact) => ({
     id: fact.id,
-    user_id: input.userId,
+    user_id: userId,
     event_id: fact.eventId,
     source_id: fact.sourceId,
     chunk_id: fact.chunkId && chunkIds.has(fact.chunkId) ? fact.chunkId : null,
@@ -163,7 +173,7 @@ export async function saveRemoteKnowledge(input: {
   }));
   const entityRows = input.entities.map((entity) => ({
     id: entity.id,
-    user_id: input.userId,
+    user_id: userId,
     kind: entity.kind,
     canonical_label: entity.canonicalLabel,
     aliases: entity.aliases,
@@ -177,7 +187,7 @@ export async function saveRemoteKnowledge(input: {
     .filter((edge) => entityIds.has(edge.fromEntityId) && entityIds.has(edge.toEntityId))
     .map((edge) => ({
     id: edge.id,
-    user_id: input.userId,
+    user_id: userId,
     from_entity_id: edge.fromEntityId,
     to_entity_id: edge.toEntityId,
     relation: edge.relation,
@@ -189,7 +199,7 @@ export async function saveRemoteKnowledge(input: {
   }));
   const reviewRows = input.reviewItems.map((item) => ({
     id: item.id,
-    user_id: input.userId,
+    user_id: userId,
     target_type: item.targetType,
     target_id: item.targetId,
     reason: item.reason,
@@ -207,8 +217,13 @@ export async function saveRemoteKnowledge(input: {
 }
 
 export async function clearRemoteWorkspace(userId: string) {
-  const supabase = getBrowserSupabase();
-  if (!supabase) return;
+  const auth = await getAuthenticatedSupabase();
+  if (!auth) return;
+  if (auth.userId !== userId) {
+    throw new Error("Signed-in account does not match the active workspace user.");
+  }
+
+  const { supabase } = auth;
   const tables = [
     "risk_alerts",
     "review_items",
@@ -222,7 +237,7 @@ export async function clearRemoteWorkspace(userId: string) {
     "sources",
   ];
   for (const table of tables) {
-    const { error } = await supabase.from(table).delete().eq("user_id", userId);
+    const { error } = await supabase.from(table).delete().eq("user_id", auth.userId);
     if (error) throw new Error(error.message);
   }
 }

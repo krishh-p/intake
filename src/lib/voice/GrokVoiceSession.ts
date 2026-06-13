@@ -1,5 +1,6 @@
 import type { IntakeChatMessage } from "@/lib/ai/intakeAgent";
 import { base64PCM16ToFloat32, float32ToPCM16Base64 } from "@/lib/voice/audio";
+import { INTAKE_TURN_DETECTION } from "@/lib/voice/intakeVoiceInstructions";
 
 const REALTIME_BASE = "wss://api.x.ai/v1/realtime";
 const CHUNK_DURATION_MS = 100;
@@ -251,7 +252,7 @@ export class GrokVoiceSession {
       session: {
         instructions: session.instructions,
         voice: session.voice,
-        turn_detection: { type: "server_vad" },
+        turn_detection: INTAKE_TURN_DETECTION,
         audio: {
           input: {
             format: { type: "audio/pcm", rate: this.sampleRate },
