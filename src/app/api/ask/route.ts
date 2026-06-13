@@ -1,4 +1,4 @@
-import { runTrendAgent } from "@/lib/agent/trendAgent";
+import { runAskAgent } from "@/lib/agent/askAgent";
 import { isAiConfigured } from "@/lib/ai/xai";
 import type { HealthEvent, Source } from "@/lib/schema";
 
@@ -26,27 +26,29 @@ export async function POST(request: Request) {
 
   let body: {
     patientName?: string;
+    question?: string;
     events?: HealthEvent[];
     sources?: Source[];
+    history?: { role: "user" | "assistant"; content: string }[];
   };
 
   try {
     body = await request.json();
   } catch {
-    return new Response(
-      sseLine({ type: "error", error: "Invalid JSON body" }),
-      {
-        status: 400,
-        headers: SSE_HEADERS,
-      },
-    );
+    return new Response(sseLine({ type: "error", error: "Invalid JSON body" }), {
+      status: 400,
+      headers: SSE_HEADERS,
+    });
   }
 
-  const { patientName, events, sources } = body;
+  const { patientName, question, events, sources, history } = body;
 
-  if (!patientName?.trim() || !events?.length) {
+  if (!patientName?.trim() || !question?.trim() || !events?.length) {
     return new Response(
-      sseLine({ type: "error", error: "patientName and events are required" }),
+      sseLine({
+        type: "error",
+        error: "patientName, question, and events are required",
+      }),
       { status: 400, headers: SSE_HEADERS },
     );
   }
@@ -60,7 +62,6 @@ export async function POST(request: Request) {
         try {
           controller.enqueue(encoder.encode(sseLine(payload)));
         } catch {
-          // Consumer disconnected; stop trying to write.
           closed = true;
         }
       };
@@ -75,21 +76,22 @@ export async function POST(request: Request) {
       send({ type: "started" });
 
       try {
-        const report = await runTrendAgent({
+        const answer = await runAskAgent({
           patientName: patientName.trim(),
+          question: question.trim(),
           events,
           sources: sources ?? [],
+          history: Array.isArray(history) ? history : [],
           onStep: (step) => send({ type: "step", ...step }),
           signal: request.signal,
         });
-        send({ type: "done", report });
+        send({ type: "done", answer });
       } catch (error) {
         if (!closed && !request.signal.aborted) {
-          console.error("Trend agent error:", error);
+          console.error("Ask agent error:", error);
           send({
             type: "error",
-            error:
-              error instanceof Error ? error.message : "Trend analysis failed",
+            error: error instanceof Error ? error.message : "Ask failed",
           });
         }
       } finally {

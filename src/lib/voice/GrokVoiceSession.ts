@@ -16,9 +16,11 @@ export type VoiceSessionStatus =
 
 type VoiceSessionConfig = {
   patientName: string;
-  mode?: "intake" | "doctor";
+  mode?: "intake" | "doctor" | "ask";
   specialty?: ReportSpecialty;
   focus?: { metric?: string; changeSummary?: string };
+  /** Plain-text health summary used to ground the "ask" voice mode. */
+  context?: string;
   onStatus: (status: VoiceSessionStatus) => void;
   onMessages: (messages: IntakeChatMessage[]) => void;
   onError: (message: string) => void;
@@ -100,6 +102,7 @@ export class GrokVoiceSession {
         mode: this.config.mode ?? "intake",
         specialty: this.config.specialty,
         focus: this.config.focus,
+        context: this.config.context,
       }),
     });
 

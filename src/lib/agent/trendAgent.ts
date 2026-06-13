@@ -1,9 +1,5 @@
 import { buildTrendTools } from "@/lib/agent/tools";
-import {
-  grokResponsesCreate,
-  isServerSideToolOutput,
-  toResponsesTools,
-} from "@/lib/ai/xai";
+import { grokResponsesCreate, toResponsesTools } from "@/lib/ai/xai";
 import { buildEvidenceIndex } from "@/lib/index/evidenceIndex";
 import type {
   AgentStep,
@@ -101,6 +97,7 @@ export async function runTrendAgent(input: {
   events: HealthEvent[];
   sources: Source[];
   onStep?: (step: AgentStep) => void;
+  signal?: AbortSignal;
 }): Promise<TrendReport> {
   const index = buildEvidenceIndex(input.sources, input.events);
   const { schemas, executors } = buildTrendTools(
@@ -135,29 +132,31 @@ export async function runTrendAgent(input: {
   };
 
   for (let step = 0; step < maxSteps; step++) {
+    if (input.signal?.aborted) break;
     emitStep("agent_turn", { turn: step + 1 }, `turn-${step + 1}`);
 
     const response = await grokResponsesCreate(nextInput, tools, {
       previousResponseId,
       maxTurns: 6,
+      signal: input.signal,
       onStreamEvent: (event) => {
-        if (event.type === "response.output_item.added" && event.item) {
+        // web_search is server-side and has no function_call_arguments.done
+        // event, so emit it as soon as the item appears.
+        if (
+          event.type === "response.output_item.added" &&
+          event.item?.type === "web_search_call"
+        ) {
           const item = event.item;
-          if (item.type === "web_search_call") {
-            emitStep(
-              "web_search",
-              { query: item.action?.query ?? item.arguments },
-              `ws-${item.id ?? item.call_id ?? JSON.stringify(item)}`
-            );
-          } else if (item.type === "function_call" && item.name) {
-            emitStep(
-              item.name,
-              parseToolArgs(item.arguments),
-              `fn-pending-${item.call_id ?? item.id ?? item.name}`
-            );
-          }
+          emitStep(
+            "web_search",
+            { query: item.action?.query ?? "" },
+            `ws-${item.id ?? item.call_id ?? "x"}`
+          );
         }
 
+        // For client function calls, wait until arguments are fully streamed so
+        // each call is shown exactly once with its real arguments (not an empty
+        // placeholder from output_item.added).
         if (
           event.type === "response.function_call_arguments.done" &&
           event.name
@@ -165,23 +164,12 @@ export async function runTrendAgent(input: {
           emitStep(
             event.name,
             parseToolArgs(event.arguments),
-            `fn-${event.call_id ?? event.name}-${event.arguments ?? ""}`
+            `fn-${event.call_id ?? event.name}`
           );
         }
       },
     });
     previousResponseId = response.id;
-
-    for (const item of response.output) {
-      if (isServerSideToolOutput(item)) {
-        const toolName = item.name ?? item.type.replace(/_call$/, "");
-        emitStep(
-          toolName,
-          parseToolArgs(item.arguments),
-          `srv-${item.call_id ?? toolName}-${item.arguments ?? ""}`
-        );
-      }
-    }
 
     const functionCalls = response.output.filter(
       (item) => item.type === "function_call"
@@ -199,11 +187,10 @@ export async function runTrendAgent(input: {
     for (const call of functionCalls) {
       const name = call.name ?? "";
       const args = parseToolArgs(call.arguments);
-      emitStep(
-        name,
-        args,
-        `fn-${call.call_id ?? name}-${call.arguments ?? ""}`
-      );
+      // Same key as the streamed arguments.done event so a call already shown
+      // in the trace isn't duplicated; also acts as a fallback if that event
+      // never streamed.
+      emitStep(name, args, `fn-${call.call_id ?? name}`);
 
       if (name === "submit_trend_report") {
         const rawTrends = (args.trends as RawTrendInput[] | undefined) ?? [];

@@ -268,6 +268,29 @@ export type AgentStep = {
   args: unknown;
 };
 
+/** A single citation in an Ask answer, resolved to the knowledge graph. */
+export type AskCitation = {
+  id: string;
+  label: string;
+  /** Graph node kind or event type, for display. */
+  kind?: string;
+  /** Knowledge-graph node to focus when the citation is clicked. */
+  nodeId?: string;
+  /** Underlying health event, when the citation is event-level. */
+  eventId?: string;
+  /** Short reason this evidence supports the answer. */
+  detail?: string;
+};
+
+export type AskAnswer = {
+  question: string;
+  answer: string;
+  citations: AskCitation[];
+  followUps: string[];
+  method: "agent" | "fallback";
+  generatedAt: string;
+};
+
 export type ReportSpecialty =
   | "primary_care"
   | "cardiology"

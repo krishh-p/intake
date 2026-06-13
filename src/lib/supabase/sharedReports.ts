@@ -2,6 +2,7 @@
 
 import { getAuthenticatedSupabase, getBrowserSupabase } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { logSupabaseError } from "@/lib/supabase/errors";
 import type { DoctorReport, ReportSpecialty, SharedReport } from "@/lib/schema";
 
 function createShareToken() {
@@ -37,7 +38,10 @@ export async function createSharedReport(input: {
     created_at: createdAt,
   });
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    logSupabaseError("createSharedReport", error);
+    throw new Error("Could not create a shareable link. Try again later.");
+  }
 
   return {
     token,
@@ -60,7 +64,10 @@ export async function getSharedReport(token: string): Promise<SharedReport | nul
     .eq("token", token)
     .maybeSingle();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    logSupabaseError("getSharedReport", error);
+    return null;
+  }
   if (!data) return null;
 
   return {

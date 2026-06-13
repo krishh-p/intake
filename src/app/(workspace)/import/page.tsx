@@ -5,6 +5,11 @@ import { PageHeader } from "@/components/layout/PageHeader";
 
 const OPTIONS = [
   {
+    href: "/import/healthex",
+    title: "Connect with Healthex",
+    description: "Securely pull your EMR/EHR records from a connected health system — no file export needed.",
+  },
+  {
     href: "/import/records",
     title: "Medical records",
     description: "Upload a JSON export from your electronic medical record system.",

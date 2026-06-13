@@ -287,6 +287,7 @@ export async function grokResponsesCreate(
     previousResponseId?: string;
     temperature?: number;
     maxTurns?: number;
+    signal?: AbortSignal;
     onStreamEvent?: (event: GrokResponsesStreamEvent) => void;
   }
 ): Promise<GrokResponsesResult> {
@@ -304,6 +305,7 @@ export async function grokResponsesCreate(
     body: JSON.stringify(
       buildResponsesBody(input, tools, { ...options, stream: true })
     ),
+    signal: options?.signal,
   });
 
   if (!response.ok) {

@@ -2,6 +2,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAuthenticatedSupabase } from "@/lib/supabase/client";
+import { logSupabaseError } from "@/lib/supabase/errors";
 import type {
   CandidateFact,
   ClinicalFact,
@@ -32,7 +33,7 @@ async function upsertRows(
   const { error } = await supabase
     .from(table)
     .upsert(rows, onConflict ? { onConflict } : undefined);
-  if (error) throw new Error(error.message);
+  if (error) logSupabaseError(`upsert:${table}`, error);
 }
 
 function dedupeRows<T extends Record<string, unknown>>(
@@ -51,9 +52,11 @@ export async function loadRemoteWorkspace(userId: string): Promise<{
   const auth = await getAuthenticatedSupabase();
   if (!auth) return { sources: [], events: [] };
   if (auth.userId !== userId) {
-    throw new Error(
+    logSupabaseError(
+      "loadRemoteWorkspace",
       "Signed-in account does not match the active workspace user.",
     );
+    return { sources: [], events: [] };
   }
 
   const { supabase } = auth;
@@ -74,8 +77,9 @@ export async function loadRemoteWorkspace(userId: string): Promise<{
       .order("observed_at"),
   ]);
 
-  if (sourcesError) throw new Error(sourcesError.message);
-  if (factsError) throw new Error(factsError.message);
+  if (sourcesError) logSupabaseError("loadRemoteWorkspace:sources", sourcesError);
+  if (factsError) logSupabaseError("loadRemoteWorkspace:clinical_facts", factsError);
+  if (sourcesError || factsError) return { sources: [], events: [] };
 
   return {
     sources: (sourceRows ?? []).map((row) => ({
@@ -120,9 +124,11 @@ export async function saveRemoteKnowledge(input: {
   const auth = await getAuthenticatedSupabase();
   if (!auth) return;
   if (auth.userId !== input.userId) {
-    throw new Error(
+    logSupabaseError(
+      "saveRemoteKnowledge",
       "Signed-in account does not match the active workspace user.",
     );
+    return;
   }
 
   const { supabase, userId } = auth;
@@ -245,8 +251,8 @@ export async function saveRemoteKnowledge(input: {
   await upsertRows(
     supabase,
     "clinical_facts",
-    dedupeRows(clinicalRows, (row) => String(row.id)),
-    "id",
+    dedupeRows(clinicalRows, (row) => String(row.event_id)),
+    "event_id",
   );
   await upsertRows(
     supabase,
@@ -273,9 +279,11 @@ export async function clearRemoteWorkspace(userId: string) {
   const auth = await getAuthenticatedSupabase();
   if (!auth) return;
   if (auth.userId !== userId) {
-    throw new Error(
+    logSupabaseError(
+      "clearRemoteWorkspace",
       "Signed-in account does not match the active workspace user.",
     );
+    return;
   }
 
   const { supabase } = auth;
@@ -296,6 +304,6 @@ export async function clearRemoteWorkspace(userId: string) {
       .from(table)
       .delete()
       .eq("user_id", auth.userId);
-    if (error) throw new Error(error.message);
+    if (error) logSupabaseError(`clearRemoteWorkspace:${table}`, error);
   }
 }

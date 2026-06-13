@@ -1,6 +1,7 @@
 import type { IntakeChatMessage, IntakeChatResponse } from "@/lib/ai/intakeAgent";
 import type {
   AgentStep,
+  AskAnswer,
   ConversationContext,
   DoctorReport,
   GraphEdge,
@@ -13,6 +14,22 @@ import type {
   TrendReport,
 } from "@/lib/schema";
 import type { DoctorNoteInput } from "@/lib/ingest/doctorNoteParser";
+
+/**
+ * Yield to the browser between streamed steps so React can paint each
+ * intermediate state. Without this, several SSE events arriving in one read are
+ * drained within a single microtask burst and only the final frame is painted —
+ * making the agent trace appear to "jump" from Thinking… straight to the result.
+ */
+function yieldToPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => resolve());
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
 
 export async function checkAiHealth(): Promise<{
   aiConfigured: boolean;
@@ -129,7 +146,11 @@ export async function searchEvidenceSemantic(
     const { data, error } = await auth.supabase.functions.invoke("evidence-ai", {
       body: { action: "search", query, match_count: matchCount },
     });
-    if (error) return null;
+    if (error) {
+      const { logSupabaseError } = await import("@/lib/supabase/errors");
+      logSupabaseError("evidence-ai:search", error);
+      return null;
+    }
     return ((data as { results?: SemanticEvidenceRow[] } | null)?.results ??
       null) as SemanticEvidenceRow[] | null;
   } catch {
@@ -155,7 +176,11 @@ export async function indexWorkspaceEmbeddings(): Promise<void> {
         const { data, error } = await auth.supabase.functions.invoke("evidence-ai", {
           body: { action: "index" },
         });
-        if (error) return;
+        if (error) {
+          const { logSupabaseError } = await import("@/lib/supabase/errors");
+          logSupabaseError("evidence-ai:index", error);
+          return;
+        }
         const hasMore = Boolean(
           (data as { hasMore?: boolean } | null)?.hasMore,
         );
@@ -276,6 +301,7 @@ export async function runTrendAgent(
 
       if (payload.type === "step" && payload.tool) {
         onStep?.({ tool: payload.tool, args: payload.args });
+        await yieldToPaint();
       } else if (payload.type === "done" && payload.report) {
         report = payload.report;
       } else if (payload.type === "error") {
@@ -289,6 +315,79 @@ export async function runTrendAgent(
   }
 
   return report;
+}
+
+export async function askHealthAgent(
+  patientName: string,
+  question: string,
+  events: HealthEvent[],
+  sources: Source[],
+  history?: { role: "user" | "assistant"; content: string }[],
+  onStep?: (step: AgentStep) => void,
+  signal?: AbortSignal
+): Promise<AskAnswer> {
+  const res = await fetch("/api/ask", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ patientName, question, events, sources, history }),
+    signal,
+  });
+
+  if (!res.ok || !res.body) {
+    let message = "Ask failed";
+    try {
+      const text = await res.text();
+      const match = text.match(/data: (.+)/);
+      if (match) {
+        const parsed = JSON.parse(match[1]) as { error?: string };
+        message = parsed.error ?? message;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    throw new Error(message);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let answer: AskAnswer | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith("data:")) continue;
+      const payload = JSON.parse(line.slice(5).trim()) as {
+        type: string;
+        tool?: string;
+        args?: unknown;
+        answer?: AskAnswer;
+        error?: string;
+      };
+
+      if (payload.type === "step" && payload.tool) {
+        onStep?.({ tool: payload.tool, args: payload.args });
+        await yieldToPaint();
+      } else if (payload.type === "done" && payload.answer) {
+        answer = payload.answer;
+      } else if (payload.type === "error") {
+        throw new Error(payload.error ?? "Ask failed");
+      }
+    }
+  }
+
+  if (!answer) {
+    throw new Error("Ask completed without an answer");
+  }
+
+  return answer;
 }
 
 export function doctorNoteToText(input: DoctorNoteInput): string {

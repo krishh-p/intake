@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getXaiVoice, getXaiVoiceModel } from "@/lib/ai/xai";
 import { buildIntakeVoiceInstructions } from "@/lib/voice/intakeVoiceInstructions";
 import { buildDoctorIntakeInstructions } from "@/lib/voice/doctorIntakeInstructions";
+import { buildAskVoiceInstructions } from "@/lib/voice/askVoiceInstructions";
 import type { ReportSpecialty } from "@/lib/schema";
 
 const SESSION_URL = "https://api.x.ai/v1/realtime/client_secrets";
@@ -26,7 +27,9 @@ export async function POST(request: Request) {
       typeof body.patientName === "string" && body.patientName.trim()
         ? body.patientName.trim()
         : "Patient";
-    const mode = body.mode === "doctor" ? "doctor" : "intake";
+    const mode =
+      body.mode === "doctor" ? "doctor" : body.mode === "ask" ? "ask" : "intake";
+    const context = typeof body.context === "string" ? body.context : "";
     const specialty =
       typeof body.specialty === "string" && VALID_SPECIALTIES.has(body.specialty)
         ? (body.specialty as ReportSpecialty)
@@ -65,9 +68,11 @@ export async function POST(request: Request) {
     const data = (await response.json()) as { value: string; expires_at: number };
 
     const instructions =
-      mode === "doctor" && specialty
-        ? buildDoctorIntakeInstructions(patientName, specialty, focus)
-        : buildIntakeVoiceInstructions(patientName);
+      mode === "ask"
+        ? buildAskVoiceInstructions(patientName, context)
+        : mode === "doctor" && specialty
+          ? buildDoctorIntakeInstructions(patientName, specialty, focus)
+          : buildIntakeVoiceInstructions(patientName);
 
     return NextResponse.json({
       token: data.value,

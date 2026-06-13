@@ -267,6 +267,20 @@ export function GraphCanvas() {
   const wheelZoomTimeoutRef = useRef<number | null>(null);
   const [isWheelZooming, setIsWheelZooming] = useState(false);
 
+  // When arriving from a citation link (/graph?focus=<nodeId>), select that node
+  // once the graph is available so its detail panel opens.
+  const focusAppliedRef = useRef(false);
+  useEffect(() => {
+    if (focusAppliedRef.current) return;
+    if (typeof window === "undefined") return;
+    const focusId = new URLSearchParams(window.location.search).get("focus");
+    if (!focusId) return;
+    if (graph.nodes.some((node) => node.id === focusId)) {
+      selectNode(focusId);
+      focusAppliedRef.current = true;
+    }
+  }, [graph.nodes, selectNode]);
+
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;

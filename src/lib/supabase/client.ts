@@ -2,6 +2,7 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getSupabaseConfig, isSupabaseConfigured } from "@/lib/supabase/config";
+import { logSupabaseError } from "@/lib/supabase/errors";
 
 let browserClient: SupabaseClient | null = null;
 
@@ -29,7 +30,10 @@ export async function getAuthenticatedSupabase() {
     error,
   } = await supabase.auth.getUser();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    logSupabaseError("getUser", error);
+    return null;
+  }
   if (!user) return null;
 
   return { supabase, userId: user.id };

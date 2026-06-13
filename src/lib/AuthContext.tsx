@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { AuthUser } from "@/lib/auth/types";
 import { getBrowserSupabase } from "@/lib/supabase/client";
+import { authErrorMessage, logSupabaseError } from "@/lib/supabase/errors";
 import {
   clearSession,
   createSession,
@@ -96,7 +97,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         email,
         password,
       });
-      if (error) throw new Error(error.message);
+      if (error) throw new Error(authErrorMessage(error));
       if (data.user) setUser(authUserFromSupabase(data.user));
       return;
     }
@@ -125,18 +126,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             },
           },
         });
-        if (error) throw new Error(error.message);
+        if (error) throw new Error(authErrorMessage(error));
         const supabaseUser = data.user;
         if (!supabaseUser) {
           throw new Error("Check your email to finish creating your account.");
         }
 
-        await supabase.from("profiles").upsert({
+        const { error: profileError } = await supabase.from("profiles").upsert({
           id: supabaseUser.id,
           email: supabaseUser.email,
           name: input.name.trim(),
           dob: input.dob,
         });
+        if (profileError) logSupabaseError("profiles:upsert", profileError);
         setUser(authUserFromSupabase(supabaseUser));
         return;
       }

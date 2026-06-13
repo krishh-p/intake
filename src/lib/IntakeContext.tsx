@@ -22,7 +22,7 @@ import {
   searchEvidenceSemantic,
 } from "@/lib/api/client";
 import { fuseEvidence, type SemanticHit } from "@/lib/index/semanticIndex";
-import { parseEmrFile } from "@/lib/ingest/emrParser";
+import { parseEmrFile, parseEmrJson } from "@/lib/ingest/emrParser";
 import { type DoctorNoteInput } from "@/lib/ingest/doctorNoteParser";
 import { buildGraphFromKnowledge } from "@/lib/graph/buildGraph";
 import { queryGraph, searchEvidenceForAlert } from "@/lib/graph/queryGraph";
@@ -43,6 +43,7 @@ import { type IntakeChatMessage } from "@/lib/ai/intakeAgent";
 import { workspaceKey } from "@/lib/auth/store";
 import type {
   ConversationContext,
+  EmrPayload,
   GraphEdge,
   GraphNode,
   HealthEvent,
@@ -74,6 +75,10 @@ type IntakeContextValue = {
   highlightedEventIds: Set<string>;
   graphFilterMode: "full" | "evidence";
   importEmrFile: (file: File) => Promise<void>;
+  importEmrPayload: (
+    data: EmrPayload,
+    sourceTitle?: string,
+  ) => Promise<number>;
   addVoiceNote: (transcript: string) => Promise<void>;
   completeIntakeConversation: (messages: IntakeChatMessage[]) => Promise<void>;
   submitDoctorNote: (input: DoctorNoteInput) => Promise<boolean>;
@@ -237,11 +242,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
       reviewItems: knowledgeReviewItems,
     })
       .then(() => {
-        // Generate embeddings for the freshly-synced rows, off the hot path.
         void indexWorkspaceEmbeddings();
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "Supabase sync failed");
       });
   }, [
     hydrated,
@@ -365,6 +366,32 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
     [user, appendIngestion],
   );
 
+  const importEmrPayload = useCallback(
+    async (data: EmrPayload, sourceTitle?: string): Promise<number> => {
+      if (!user) return 0;
+      setError(null);
+      setProcessing({ active: true, message: "Syncing connected records" });
+      try {
+        const { source, events: imported } = parseEmrJson(user.id, data);
+        if (imported.length === 0) {
+          setError("No records were returned from the connected provider.");
+          return 0;
+        }
+        appendIngestion(
+          sourceTitle ? { ...source, title: sourceTitle } : source,
+          imported,
+        );
+        return imported.length;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Record sync failed");
+        return 0;
+      } finally {
+        setProcessing({ active: false, message: "" });
+      }
+    },
+    [user, appendIngestion],
+  );
+
   const addVoiceNote = useCallback(
     async (transcript: string) => {
       if (!user) return;
@@ -471,13 +498,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
         workspaceKey(user.id),
         JSON.stringify({ sources: [], events: [], contexts: [] }),
       );
-      clearRemoteWorkspace(user.id).catch((err) => {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Failed to clear remote workspace",
-        );
-      });
+      clearRemoteWorkspace(user.id);
     }
   }, [user]);
 
@@ -640,6 +661,7 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
         highlightedEventIds,
         graphFilterMode,
         importEmrFile: importEmrFileHandler,
+        importEmrPayload,
         addVoiceNote,
         completeIntakeConversation,
         submitDoctorNote,
