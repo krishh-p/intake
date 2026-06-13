@@ -11,7 +11,7 @@ const NAV = [
   { href: "/import", label: "Import", icon: ImportIcon },
   { href: "/timeline", label: "Timeline", icon: TimelineIcon },
   { href: "/graph", label: "Knowledge graph", icon: GraphIcon },
-  { href: "/insights", label: "Insights", icon: InsightsIcon },
+  { href: "/trends", label: "Trends", icon: TrendsIcon },
   { href: "/reports", label: "Reports", icon: ReportsIcon },
 ];
 
@@ -19,7 +19,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { user, logout } = useAuth();
-  const { state, alerts, indexStats } = useIntake();
+  const { state, indexStats } = useIntake();
 
   function handleSignOut() {
     logout();
@@ -61,16 +61,6 @@ export function Sidebar() {
                 )}
               />
               {label}
-              {href === "/insights" && alerts.length > 0 && (
-                <span
-                  className={cn(
-                    "ml-auto font-mono-data text-[10px]",
-                    active ? "text-accent" : "text-alert-high"
-                  )}
-                >
-                  {alerts.length}
-                </span>
-              )}
             </Link>
           );
         })}
@@ -128,10 +118,10 @@ function GraphIcon({ className }: { className?: string }) {
   );
 }
 
-function InsightsIcon({ className }: { className?: string }) {
+function TrendsIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 18L9 11.25l4.306 4.307a11.95 11.95 0 015.814-5.519l2.74-1.22m0 0l-5.94-2.28m5.94 2.28l-2.28 5.941" />
     </svg>
   );
 }

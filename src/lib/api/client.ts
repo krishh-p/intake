@@ -1,5 +1,6 @@
 import type { IntakeChatMessage, IntakeChatResponse } from "@/lib/ai/intakeAgent";
 import type {
+  AgentStep,
   ConversationContext,
   DoctorReport,
   GraphEdge,
@@ -9,6 +10,7 @@ import type {
   RiskAlert,
   Source,
   SourceType,
+  TrendReport,
 } from "@/lib/schema";
 import type { DoctorNoteInput } from "@/lib/ingest/doctorNoteParser";
 
@@ -132,6 +134,74 @@ export async function generateAiReport(
     throw new Error(err.error ?? "Report generation failed");
   }
   return res.json();
+}
+
+export async function runTrendAgent(
+  patientName: string,
+  events: HealthEvent[],
+  sources: Source[],
+  onStep?: (step: AgentStep) => void
+): Promise<TrendReport> {
+  const res = await fetch("/api/trends/agent", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ patientName, events, sources }),
+  });
+
+  if (!res.ok || !res.body) {
+    let message = "Trend analysis failed";
+    try {
+      const text = await res.text();
+      const match = text.match(/data: (.+)/);
+      if (match) {
+        const parsed = JSON.parse(match[1]) as { error?: string };
+        message = parsed.error ?? message;
+      }
+    } catch {
+      // ignore parse errors
+    }
+    throw new Error(message);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let report: TrendReport | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split("\n\n");
+    buffer = parts.pop() ?? "";
+
+    for (const part of parts) {
+      const line = part.trim();
+      if (!line.startsWith("data:")) continue;
+      const payload = JSON.parse(line.slice(5).trim()) as {
+        type: string;
+        tool?: string;
+        args?: unknown;
+        report?: TrendReport;
+        error?: string;
+      };
+
+      if (payload.type === "step" && payload.tool) {
+        onStep?.({ tool: payload.tool, args: payload.args });
+      } else if (payload.type === "done" && payload.report) {
+        report = payload.report;
+      } else if (payload.type === "error") {
+        throw new Error(payload.error ?? "Trend analysis failed");
+      }
+    }
+  }
+
+  if (!report) {
+    throw new Error("Trend analysis completed without a report");
+  }
+
+  return report;
 }
 
 export function doctorNoteToText(input: DoctorNoteInput): string {

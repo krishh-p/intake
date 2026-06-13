@@ -37,7 +37,34 @@ export function getXaiVoice(): string {
   return process.env.XAI_VOICE?.trim() || DEFAULT_VOICE;
 }
 
+/** Tool-capable text model — avoids voice models in XAI_MODEL. */
+export function getXaiToolModel(): string {
+  return process.env.XAI_TOOL_MODEL ?? "grok-3-fast";
+}
+
 type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+
+export type GrokToolCall = {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+};
+
+export type GrokToolMessage = {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: GrokToolCall[];
+  tool_call_id?: string;
+};
+
+export type GrokToolDef = {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+};
 
 export async function grokChat(
   messages: ChatMessage[],
@@ -75,6 +102,48 @@ export async function grokChat(
   const content = data.choices?.[0]?.message?.content;
   if (!content) throw new Error("Empty response from Grok");
   return content;
+}
+
+export async function grokChatWithTools(
+  messages: GrokToolMessage[],
+  tools: GrokToolDef[],
+  options?: {
+    temperature?: number;
+    toolChoice?: "auto" | "required" | "none";
+    model?: string;
+  }
+): Promise<GrokToolMessage> {
+  const apiKey = process.env.XAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("XAI_API_KEY is not configured");
+  }
+
+  const response = await fetch(`${XAI_BASE}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: options?.model ?? getXaiToolModel(),
+      messages,
+      tools,
+      tool_choice: options?.toolChoice ?? "auto",
+      temperature: options?.temperature ?? 0.1,
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`Grok API error ${response.status}: ${errText}`);
+  }
+
+  const data = (await response.json()) as {
+    choices?: { message?: GrokToolMessage }[];
+  };
+  const msg = data.choices?.[0]?.message;
+  if (!msg) throw new Error("Empty response from Grok");
+  return msg;
 }
 
 export function parseJsonResponse<T>(raw: string): T {

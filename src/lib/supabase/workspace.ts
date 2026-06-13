@@ -26,19 +26,18 @@ async function upsertRows(
   supabase: SupabaseClient,
   table: string,
   rows: Record<string, unknown>[],
-  onConflict?: string
+  onConflict?: string,
 ) {
   if (rows.length === 0) return;
-  const { error } = await supabase.from(table).upsert(
-    rows,
-    onConflict ? { onConflict } : undefined
-  );
+  const { error } = await supabase
+    .from(table)
+    .upsert(rows, onConflict ? { onConflict } : undefined);
   if (error) throw new Error(error.message);
 }
 
 function dedupeRows<T extends Record<string, unknown>>(
   rows: T[],
-  keyFor: (row: T) => string
+  keyFor: (row: T) => string,
 ): T[] {
   const byKey = new Map<string, T>();
   for (const row of rows) byKey.set(keyFor(row), row);
@@ -52,16 +51,28 @@ export async function loadRemoteWorkspace(userId: string): Promise<{
   const auth = await getAuthenticatedSupabase();
   if (!auth) return { sources: [], events: [] };
   if (auth.userId !== userId) {
-    throw new Error("Signed-in account does not match the active workspace user.");
+    throw new Error(
+      "Signed-in account does not match the active workspace user.",
+    );
   }
 
   const { supabase } = auth;
 
-  const [{ data: sourceRows, error: sourcesError }, { data: factRows, error: factsError }] =
-    await Promise.all([
-      supabase.from("sources").select("*").eq("user_id", auth.userId).order("captured_at"),
-      supabase.from("clinical_facts").select("*").eq("user_id", auth.userId).order("observed_at"),
-    ]);
+  const [
+    { data: sourceRows, error: sourcesError },
+    { data: factRows, error: factsError },
+  ] = await Promise.all([
+    supabase
+      .from("sources")
+      .select("*")
+      .eq("user_id", auth.userId)
+      .order("captured_at"),
+    supabase
+      .from("clinical_facts")
+      .select("*")
+      .eq("user_id", auth.userId)
+      .order("observed_at"),
+  ]);
 
   if (sourcesError) throw new Error(sourcesError.message);
   if (factsError) throw new Error(factsError.message);
@@ -109,7 +120,9 @@ export async function saveRemoteKnowledge(input: {
   const auth = await getAuthenticatedSupabase();
   if (!auth) return;
   if (auth.userId !== input.userId) {
-    throw new Error("Signed-in account does not match the active workspace user.");
+    throw new Error(
+      "Signed-in account does not match the active workspace user.",
+    );
   }
 
   const { supabase, userId } = auth;
@@ -128,63 +141,65 @@ export async function saveRemoteKnowledge(input: {
   const chunkRows = input.sourceChunks
     .filter((chunk) => sourceIds.has(chunk.sourceId))
     .map((chunk) => ({
-    id: chunk.id,
-    user_id: userId,
-    source_id: chunk.sourceId,
-    ordinal: chunk.ordinal,
-    start_offset: chunk.startOffset,
-    end_offset: chunk.endOffset,
-    text: chunk.text,
-    metadata: {},
-  }));
+      id: chunk.id,
+      user_id: userId,
+      source_id: chunk.sourceId,
+      ordinal: chunk.ordinal,
+      start_offset: chunk.startOffset,
+      end_offset: chunk.endOffset,
+      text: chunk.text,
+      metadata: {},
+    }));
   const chunkIds = new Set(chunkRows.map((chunk) => chunk.id));
 
   const candidateRows = input.candidateFacts
     .filter((fact) => sourceIds.has(fact.sourceId))
     .map((fact) => ({
-    id: fact.id,
-    user_id: userId,
-    source_id: fact.sourceId,
-    chunk_id: fact.chunkId && chunkIds.has(fact.chunkId) ? fact.chunkId : null,
-    kind: fact.kind,
-    label: fact.label,
-    normalized_label: fact.normalizedLabel,
-    value: valueToJson(fact.value),
-    unit: fact.unit ?? null,
-    observed_at: fact.observedAt,
-    status: fact.status ?? null,
-    relevance: fact.relevance,
-    confidence: fact.confidence,
-    evidence_quote: fact.evidenceQuote ?? null,
-    negated: fact.negated ?? false,
-    uncertain: fact.uncertain ?? false,
-    metadata: fact.metadata ?? {},
-  }));
+      id: fact.id,
+      user_id: userId,
+      source_id: fact.sourceId,
+      chunk_id:
+        fact.chunkId && chunkIds.has(fact.chunkId) ? fact.chunkId : null,
+      kind: fact.kind,
+      label: fact.label,
+      normalized_label: fact.normalizedLabel,
+      value: valueToJson(fact.value),
+      unit: fact.unit ?? null,
+      observed_at: fact.observedAt,
+      status: fact.status ?? null,
+      relevance: fact.relevance,
+      confidence: fact.confidence,
+      evidence_quote: fact.evidenceQuote ?? null,
+      negated: fact.negated ?? false,
+      uncertain: fact.uncertain ?? false,
+      metadata: fact.metadata ?? {},
+    }));
   const clinicalRows = input.clinicalFacts
     .filter((fact) => sourceIds.has(fact.sourceId))
     .map((fact) => ({
-    id: fact.id,
-    user_id: userId,
-    event_id: fact.eventId,
-    source_id: fact.sourceId,
-    chunk_id: fact.chunkId && chunkIds.has(fact.chunkId) ? fact.chunkId : null,
-    entity_id: fact.entityId ?? null,
-    kind: fact.kind,
-    label: fact.label,
-    normalized_label: fact.normalizedLabel,
-    value: valueToJson(fact.value),
-    unit: fact.unit ?? null,
-    observed_at: fact.observedAt,
-    status: fact.status ?? null,
-    relevance: fact.relevance,
-    confidence: fact.confidence,
-    review_status: fact.reviewStatus,
-    provenance: fact.provenance,
-    evidence_quote: fact.evidenceQuote ?? null,
-    negated: fact.negated ?? false,
-    uncertain: fact.uncertain ?? false,
-    metadata: fact.metadata ?? {},
-  }));
+      id: fact.id,
+      user_id: userId,
+      event_id: fact.eventId,
+      source_id: fact.sourceId,
+      chunk_id:
+        fact.chunkId && chunkIds.has(fact.chunkId) ? fact.chunkId : null,
+      entity_id: fact.entityId ?? null,
+      kind: fact.kind,
+      label: fact.label,
+      normalized_label: fact.normalizedLabel,
+      value: valueToJson(fact.value),
+      unit: fact.unit ?? null,
+      observed_at: fact.observedAt,
+      status: fact.status ?? null,
+      relevance: fact.relevance,
+      confidence: fact.confidence,
+      review_status: fact.reviewStatus,
+      provenance: fact.provenance,
+      evidence_quote: fact.evidenceQuote ?? null,
+      negated: fact.negated ?? false,
+      uncertain: fact.uncertain ?? false,
+      metadata: fact.metadata ?? {},
+    }));
   const entityRows = input.entities.map((entity) => ({
     id: entity.id,
     user_id: userId,
@@ -198,19 +213,22 @@ export async function saveRemoteKnowledge(input: {
   }));
   const entityIds = new Set(entityRows.map((entity) => entity.id));
   const edgeRows = input.graphRelationships
-    .filter((edge) => entityIds.has(edge.fromEntityId) && entityIds.has(edge.toEntityId))
+    .filter(
+      (edge) =>
+        entityIds.has(edge.fromEntityId) && entityIds.has(edge.toEntityId),
+    )
     .map((edge) => ({
-    id: edge.id,
-    user_id: userId,
-    from_entity_id: edge.fromEntityId,
-    to_entity_id: edge.toEntityId,
-    relation: edge.relation,
-    confidence: edge.confidence,
-    evidence_fact_ids: edge.evidenceFactIds,
-    provenance: edge.provenance,
-    review_status: edge.reviewStatus,
-    metadata: edge.metadata ?? {},
-  }));
+      id: edge.id,
+      user_id: userId,
+      from_entity_id: edge.fromEntityId,
+      to_entity_id: edge.toEntityId,
+      relation: edge.relation,
+      confidence: edge.confidence,
+      evidence_fact_ids: edge.evidenceFactIds,
+      provenance: edge.provenance,
+      review_status: edge.reviewStatus,
+      metadata: edge.metadata ?? {},
+    }));
   const reviewRows = input.reviewItems.map((item) => ({
     id: item.id,
     user_id: userId,
@@ -228,22 +246,26 @@ export async function saveRemoteKnowledge(input: {
     supabase,
     "clinical_facts",
     dedupeRows(clinicalRows, (row) => String(row.event_id)),
-    "event_id"
+    "event_id",
   );
   await upsertRows(
     supabase,
     "entities",
-    dedupeRows(entityRows, (row) => `${row.user_id}:${row.kind}:${row.canonical_label}`),
-    "user_id,kind,canonical_label"
+    dedupeRows(
+      entityRows,
+      (row) => `${row.user_id}:${row.kind}:${row.canonical_label}`,
+    ),
+    "user_id,kind,canonical_label",
   );
   await upsertRows(
     supabase,
     "graph_edges",
     dedupeRows(
       edgeRows,
-      (row) => `${row.user_id}:${row.from_entity_id}:${row.to_entity_id}:${row.relation}`
+      (row) =>
+        `${row.user_id}:${row.from_entity_id}:${row.to_entity_id}:${row.relation}`,
     ),
-    "user_id,from_entity_id,to_entity_id,relation"
+    "user_id,from_entity_id,to_entity_id,relation",
   );
   await upsertRows(supabase, "review_items", reviewRows);
 }
@@ -252,7 +274,9 @@ export async function clearRemoteWorkspace(userId: string) {
   const auth = await getAuthenticatedSupabase();
   if (!auth) return;
   if (auth.userId !== userId) {
-    throw new Error("Signed-in account does not match the active workspace user.");
+    throw new Error(
+      "Signed-in account does not match the active workspace user.",
+    );
   }
 
   const { supabase } = auth;
@@ -269,7 +293,10 @@ export async function clearRemoteWorkspace(userId: string) {
     "sources",
   ];
   for (const table of tables) {
-    const { error } = await supabase.from(table).delete().eq("user_id", auth.userId);
+    const { error } = await supabase
+      .from(table)
+      .delete()
+      .eq("user_id", auth.userId);
     if (error) throw new Error(error.message);
   }
 }

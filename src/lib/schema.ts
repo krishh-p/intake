@@ -191,6 +191,32 @@ export type RiskAlert = {
   suggestedQuestions: string[];
 };
 
+export type TrendDirection = "improving" | "worsening" | "stable";
+
+export type Trend = {
+  id: string;
+  metric: string;
+  direction: TrendDirection;
+  severity: "high" | "medium" | "low";
+  changeSummary: string;
+  narrative: string;
+  suggestedActions: string[];
+  window?: { start: string; end: string };
+  dataPoints?: { observedAt: string; value: number; unit?: string }[];
+  evidenceEventIds: string[];
+};
+
+export type TrendReport = {
+  trends: Trend[];
+  generatedAt: string;
+  method: "agent" | "fallback";
+};
+
+export type AgentStep = {
+  tool: string;
+  args: unknown;
+};
+
 export type ReportSpecialty =
   | "primary_care"
   | "cardiology"
