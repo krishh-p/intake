@@ -253,17 +253,6 @@ export function IntakeProvider({ children }: { children: ReactNode }) {
     knowledgeReviewItems,
   ]);
 
-  // One-shot backfill: embed any existing rows that predate this feature so
-  // semantic search works on first login without waiting for a new write.
-  const backfilledRef = useRef(false);
-  useEffect(() => {
-    if (backfilledRef.current) return;
-    if (!hydrated || !user || !isSupabaseConfigured()) return;
-    if (events.length === 0) return;
-    backfilledRef.current = true;
-    void indexWorkspaceEmbeddings();
-  }, [hydrated, user, events]);
-
   const reanalyze = useCallback(
     async (
       evts: HealthEvent[],

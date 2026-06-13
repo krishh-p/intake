@@ -103,7 +103,9 @@ export function acceptCandidate(
 
   const fact: ClinicalFact = {
     ...candidate,
-    id: stableId("fact", `${candidate.patientId}:${candidate.sourceId}:${candidate.kind}:${candidate.normalizedLabel}:${candidate.observedAt}:${String(candidate.value ?? "")}`),
+    // Align fact id with event id so Supabase upserts never collide on `id`
+    // when two events share the same clinical content but different event ids.
+    id: eventId,
     eventId,
     reviewStatus: validation.reviewReason ? "needs_review" : "accepted",
     provenance: [

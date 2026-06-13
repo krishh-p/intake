@@ -20,6 +20,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 const session = new Supabase.ai.Session("gte-small");
+const INDEX_BATCH_SIZE = 25;
 
 const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -80,37 +81,52 @@ Deno.serve(async (req: Request) => {
     let facts = 0;
     let chunks = 0;
 
-    const { data: factRows } = await supabase
-      .from("clinical_facts")
-      .select("id,label,normalized_label,value,unit,evidence_quote")
-      .is("embedding", null)
-      .limit(1000);
-    for (const f of factRows ?? []) {
-      const vector = await embed(factText(f as Record<string, unknown>));
-      const { error } = await supabase
+    try {
+      const { data: factRows } = await supabase
         .from("clinical_facts")
-        .update({ embedding: vector })
-        .eq("id", (f as { id: string }).id);
-      if (!error) facts++;
-    }
+        .select("id,label,normalized_label,value,unit,evidence_quote")
+        .is("embedding", null)
+        .limit(INDEX_BATCH_SIZE);
+      for (const f of factRows ?? []) {
+        const vector = await embed(factText(f as Record<string, unknown>));
+        const { error } = await supabase
+          .from("clinical_facts")
+          .update({ embedding: vector })
+          .eq("id", (f as { id: string }).id);
+        if (!error) facts++;
+      }
 
-    const { data: chunkRows } = await supabase
-      .from("source_chunks")
-      .select("id,text")
-      .is("embedding", null)
-      .limit(1000);
-    for (const c of chunkRows ?? []) {
-      const text = String((c as { text?: string }).text ?? "").slice(0, 1800);
-      if (!text) continue;
-      const vector = await embed(text);
-      const { error } = await supabase
+      const remainingFactBudget = Math.max(INDEX_BATCH_SIZE - facts, 0);
+      const { data: chunkRows } = await supabase
         .from("source_chunks")
-        .update({ embedding: vector })
-        .eq("id", (c as { id: string }).id);
-      if (!error) chunks++;
-    }
+        .select("id,text")
+        .is("embedding", null)
+        .limit(remainingFactBudget || INDEX_BATCH_SIZE);
+      for (const c of chunkRows ?? []) {
+        const text = String((c as { text?: string }).text ?? "").slice(0, 1800);
+        if (!text) continue;
+        const vector = await embed(text);
+        const { error } = await supabase
+          .from("source_chunks")
+          .update({ embedding: vector })
+          .eq("id", (c as { id: string }).id);
+        if (!error) chunks++;
+      }
 
-    return json({ indexed: { facts, chunks } });
+      const hasMore =
+        (factRows?.length ?? 0) >= INDEX_BATCH_SIZE ||
+        (chunkRows?.length ?? 0) >= (remainingFactBudget || INDEX_BATCH_SIZE);
+
+      return json({ indexed: { facts, chunks }, hasMore });
+    } catch (err) {
+      return json(
+        {
+          error: err instanceof Error ? err.message : "Indexing failed",
+          indexed: { facts, chunks },
+        },
+        500,
+      );
+    }
   }
 
   // default action: semantic search

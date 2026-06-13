@@ -245,15 +245,14 @@ export async function saveRemoteKnowledge(input: {
   await upsertRows(
     supabase,
     "clinical_facts",
-    dedupeRows(clinicalRows, (row) => String(row.event_id)),
-    "event_id",
+    dedupeRows(clinicalRows, (row) => String(row.id)),
+    "id",
   );
   await upsertRows(
     supabase,
     "entities",
-    dedupeRows(
-      entityRows,
-      (row) => `${row.user_id}:${row.kind}:${row.canonical_label}`,
+    dedupeRows(entityRows, (row) =>
+      `${row.user_id}:${row.kind}:${String(row.canonical_label).toLowerCase()}`,
     ),
     "user_id,kind,canonical_label",
   );

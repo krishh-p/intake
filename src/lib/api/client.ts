@@ -137,21 +137,35 @@ export async function searchEvidenceSemantic(
   }
 }
 
+let indexEmbeddingsQueue: Promise<void> = Promise.resolve();
+
 /**
  * Backfill embeddings for the signed-in user's rows that don't have one yet.
  * Idempotent and best-effort; runs off the hot path (after a sync / on load).
+ * Serialized and batched so concurrent callers don't overwhelm the edge function.
  */
 export async function indexWorkspaceEmbeddings(): Promise<void> {
-  try {
-    const { getAuthenticatedSupabase } = await import("@/lib/supabase/client");
-    const auth = await getAuthenticatedSupabase();
-    if (!auth) return;
-    await auth.supabase.functions.invoke("evidence-ai", {
-      body: { action: "index" },
-    });
-  } catch {
-    // best-effort: semantic ranking simply won't include un-embedded rows yet
-  }
+  indexEmbeddingsQueue = indexEmbeddingsQueue.then(async () => {
+    try {
+      const { getAuthenticatedSupabase } = await import("@/lib/supabase/client");
+      const auth = await getAuthenticatedSupabase();
+      if (!auth) return;
+
+      for (let pass = 0; pass < 12; pass++) {
+        const { data, error } = await auth.supabase.functions.invoke("evidence-ai", {
+          body: { action: "index" },
+        });
+        if (error) return;
+        const hasMore = Boolean(
+          (data as { hasMore?: boolean } | null)?.hasMore,
+        );
+        if (!hasMore) return;
+      }
+    } catch {
+      // best-effort: semantic ranking simply won't include un-embedded rows yet
+    }
+  });
+  await indexEmbeddingsQueue;
 }
 
 export async function analyzeRisk(
