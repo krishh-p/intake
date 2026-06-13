@@ -48,18 +48,19 @@ describe("computeConfidence", () => {
   });
 
   it("boosts confidence when multiple sources corroborate", () => {
+    // Use inputs below the 1.0 cap so corroboration headroom is observable.
     const single = computeConfidence({
-      sourceType: "emr",
+      sourceType: "voice",
       grounded: true,
-      hasQuote: true,
-      hasCoding: true,
+      hasQuote: false,
+      hasCoding: false,
       sourceCount: 1,
     });
     const corroborated = computeConfidence({
-      sourceType: "emr",
+      sourceType: "voice",
       grounded: true,
-      hasQuote: true,
-      hasCoding: true,
+      hasQuote: false,
+      hasCoding: false,
       sourceCount: 2,
     });
     expect(corroborated).toBeGreaterThan(single);
