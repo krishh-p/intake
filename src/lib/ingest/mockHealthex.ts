@@ -9,9 +9,12 @@ export type HealthexProvider = {
   buildPayload: () => EmrPayload;
 };
 
-/** ISO date `months` before now (optionally with a day-of-month offset). */
+/** Fixed reference date so demo payloads stay before June 2026. */
+const MOCK_AS_OF = new Date("2026-05-15T12:00:00.000Z");
+
+/** ISO date `months` before {@link MOCK_AS_OF}. */
 function monthsAgo(months: number): string {
-  const d = new Date();
+  const d = new Date(MOCK_AS_OF);
   d.setMonth(d.getMonth() - months);
   return d.toISOString();
 }
@@ -72,8 +75,8 @@ function stanfordPayload(): EmrPayload {
       },
     ],
     careTasks: [
-      { label: "Repeat BMP and HbA1c in 3 months", due: monthsAgo(-3), status: "pending" },
-      { label: "Schedule nephrology consult", due: monthsAgo(-1), status: "pending" },
+      { label: "Repeat BMP and HbA1c in 3 months", due: "2026-05-28T12:00:00.000Z", status: "pending" },
+      { label: "Schedule nephrology consult", due: "2026-05-22T12:00:00.000Z", status: "pending" },
     ],
   };
 }

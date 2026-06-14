@@ -81,12 +81,41 @@ export type GrokResponsesOutputItem = {
   call_id?: string;
   name?: string;
   arguments?: string;
+  role?: string;
+  text?: string;
+  content?: Array<{ type?: string; text?: string }> | string;
 };
 
 export type GrokResponsesResult = {
   id: string;
   output: GrokResponsesOutputItem[];
+  /** Concatenated assistant message text, when the model answered in prose. */
+  outputText?: string;
 };
+
+/** Tool selection for the Responses API. */
+export type GrokToolChoice =
+  | "auto"
+  | "required"
+  | "none"
+  | { type: "function"; name: string };
+
+/** Pull assistant prose out of a Responses result (streamed or from output items). */
+export function extractResponsesText(result: GrokResponsesResult): string {
+  if (result.outputText?.trim()) return result.outputText.trim();
+  const parts: string[] = [];
+  for (const item of result.output) {
+    if (item.type !== "message" && item.role !== "assistant") continue;
+    if (typeof item.text === "string") parts.push(item.text);
+    if (typeof item.content === "string") parts.push(item.content);
+    else if (Array.isArray(item.content)) {
+      for (const c of item.content) {
+        if (typeof c.text === "string") parts.push(c.text);
+      }
+    }
+  }
+  return parts.join("").trim();
+}
 
 export function toResponsesTools(
   schemas: GrokToolDef[],
@@ -213,6 +242,7 @@ type GrokResponsesStreamEvent = {
   call_id?: string;
   name?: string;
   arguments?: string;
+  delta?: string;
 };
 
 function buildResponsesBody(
@@ -224,6 +254,7 @@ function buildResponsesBody(
     temperature?: number;
     maxTurns?: number;
     stream?: boolean;
+    toolChoice?: GrokToolChoice;
   }
 ) {
   const body: Record<string, unknown> = {
@@ -240,6 +271,9 @@ function buildResponsesBody(
   }
   if (options?.stream) {
     body.stream = true;
+  }
+  if (options?.toolChoice) {
+    body.tool_choice = options.toolChoice;
   }
   return body;
 }
@@ -288,6 +322,7 @@ export async function grokResponsesCreate(
     temperature?: number;
     maxTurns?: number;
     signal?: AbortSignal;
+    toolChoice?: GrokToolChoice;
     onStreamEvent?: (event: GrokResponsesStreamEvent) => void;
   }
 ): Promise<GrokResponsesResult> {
@@ -321,6 +356,20 @@ export async function grokResponsesCreate(
   const decoder = new TextDecoder();
   let buffer = "";
   let result: GrokResponsesResult | null = null;
+  let streamedText = "";
+
+  // Capture assistant prose deltas so callers can recover an answer the model
+  // wrote as text instead of via a tool call.
+  const onEvent = (event: GrokResponsesStreamEvent) => {
+    if (
+      typeof event.delta === "string" &&
+      (event.type === "response.output_text.delta" ||
+        event.type === "response.output_audio_transcript.delta")
+    ) {
+      streamedText += event.delta;
+    }
+    options?.onStreamEvent?.(event);
+  };
 
   while (true) {
     const { done, value } = await reader.read();
@@ -331,18 +380,22 @@ export async function grokResponsesCreate(
     buffer = parts.pop() ?? "";
 
     for (const part of parts) {
-      const completed = parseResponsesSseChunk(part, options?.onStreamEvent);
+      const completed = parseResponsesSseChunk(part, onEvent);
       if (completed) result = completed;
     }
   }
 
   if (buffer.trim()) {
-    const completed = parseResponsesSseChunk(buffer, options?.onStreamEvent);
+    const completed = parseResponsesSseChunk(buffer, onEvent);
     if (completed) result = completed;
   }
 
   if (!result?.output) {
     throw new Error("Stream ended without a completed Grok response");
+  }
+
+  if (streamedText.trim() && !result.outputText) {
+    result.outputText = streamedText.trim();
   }
 
   return result;

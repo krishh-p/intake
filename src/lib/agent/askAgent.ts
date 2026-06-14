@@ -1,5 +1,9 @@
 import { buildAskTools } from "@/lib/agent/askTools";
-import { grokResponsesCreate, toResponsesTools } from "@/lib/ai/xai";
+import {
+  extractResponsesText,
+  grokResponsesCreate,
+  toResponsesTools,
+} from "@/lib/ai/xai";
 import { buildGraphFromKnowledge } from "@/lib/graph/buildGraph";
 import { buildEvidenceIndex } from "@/lib/index/evidenceIndex";
 import { buildKnowledgeFromEvents } from "@/lib/knowledge/facts";
@@ -29,7 +33,7 @@ Hard rules:
 - Write a clear, warm, plain-English answer for the patient. Reference citations inline as [1], [2], … in the same order as the citations array.
 - You are not a doctor and must not give a diagnosis or prescribe. Explain what the patient's own data shows and suggest discussing specifics with their clinician.
 - If the data cannot answer the question, say so honestly and cite what you do know.
-- Finish by calling submit_answer exactly once.`;
+- ALWAYS deliver your final answer by calling submit_answer exactly once. NEVER write the final answer as plain text — if you write prose instead of calling submit_answer, the patient sees nothing.`;
 
 function parseToolArgs(raw?: string): Record<string, unknown> {
   if (!raw) return {};
@@ -178,6 +182,53 @@ export async function runAskAgent(input: {
     input.onStep?.({ tool, args });
   };
 
+  // Most recent assistant prose, in case the model writes its answer as text
+  // instead of calling submit_answer.
+  let lastAssistantText = "";
+
+  // Force a final submit_answer via tool_choice. Returns the structured answer
+  // when the model complies, else null (capturing any prose it produced).
+  const forceSubmit = async (instruction: string): Promise<AskAnswer | null> => {
+    if (input.signal?.aborted) return null;
+    try {
+      const forced = await grokResponsesCreate(
+        [{ role: "user" as const, content: instruction }],
+        tools,
+        {
+          previousResponseId,
+          maxTurns: 2,
+          signal: input.signal,
+          toolChoice: { type: "function", name: "submit_answer" },
+        },
+      );
+      if (forced.id) previousResponseId = forced.id;
+      const submit = forced.output.find(
+        (item) => item.type === "function_call" && item.name === "submit_answer",
+      );
+      if (submit) {
+        input.onStep?.({
+          tool: "submit_answer",
+          args: parseToolArgs(submit.arguments),
+        });
+        return buildAnswer(question, parseToolArgs(submit.arguments), nodes, events);
+      }
+      const text = extractResponsesText(forced);
+      if (text) lastAssistantText = text;
+    } catch {
+      // fall through
+    }
+    return null;
+  };
+
+  const proseAnswer = (): AskAnswer => ({
+    question,
+    answer: lastAssistantText,
+    citations: [],
+    followUps: [],
+    method: "agent",
+    generatedAt: new Date().toISOString(),
+  });
+
   for (let step = 0; step < maxSteps; step++) {
     if (input.signal?.aborted) break;
     emitStep("agent_turn", { turn: step + 1 }, `turn-${step + 1}`);
@@ -201,10 +252,24 @@ export async function runAskAgent(input: {
     });
     previousResponseId = response.id;
 
+    const text = extractResponsesText(response);
+    if (text) lastAssistantText = text;
+
     const functionCalls = response.output.filter(
       (item) => item.type === "function_call"
     );
-    if (!functionCalls.length) break;
+
+    if (!functionCalls.length) {
+      // The model answered in prose instead of calling submit_answer. Force the
+      // tool so we get structured citations; if it still won't, surface the
+      // prose rather than the canned fallback.
+      const forced = await forceSubmit(
+        "Provide your final answer now by calling submit_answer, with citations referencing the nodeIds/eventIds from the tool results above.",
+      );
+      if (forced) return forced;
+      if (lastAssistantText) return proseAnswer();
+      break;
+    }
 
     const toolOutputs: Array<{
       type: "function_call_output";
@@ -233,32 +298,13 @@ export async function runAskAgent(input: {
     nextInput = toolOutputs;
   }
 
-  // Out of investigation steps — make one final forced attempt to answer with
-  // whatever evidence has been gathered, rather than dropping to a bare fallback.
-  if (!input.signal?.aborted) {
-    try {
-      const forced = await grokResponsesCreate(
-        [
-          {
-            role: "user" as const,
-            content:
-              "You are out of investigation steps. Call submit_answer now with your best answer, grounded only in the evidence you have already gathered, with citations.",
-          },
-        ],
-        tools,
-        { previousResponseId, maxTurns: 2, signal: input.signal },
-      );
-      const submit = forced.output.find(
-        (item) => item.type === "function_call" && item.name === "submit_answer",
-      );
-      if (submit) {
-        input.onStep?.({ tool: "submit_answer", args: parseToolArgs(submit.arguments) });
-        return buildAnswer(question, parseToolArgs(submit.arguments), nodes, events);
-      }
-    } catch {
-      // fall through to fallback
-    }
-  }
+  // Out of investigation steps — force one final structured answer, then fall
+  // back to any prose, and only then to the canned message.
+  const forced = await forceSubmit(
+    "You are out of investigation steps. Call submit_answer now with your best answer, grounded only in the evidence you have already gathered, with citations.",
+  );
+  if (forced) return forced;
+  if (lastAssistantText) return proseAnswer();
 
   return {
     question,
