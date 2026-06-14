@@ -17,9 +17,9 @@ export default function OverviewPage() {
 
   const links = [
     {
-      href: "/import/records",
-      title: "Import records",
-      description: "Upload EMR exports from your provider",
+      href: "/import/healthex",
+      title: "Connect with Healthex",
+      description: "Pull your EMR/EHR records from a connected health system",
     },
     {
       href: "/import/voice",

@@ -25,7 +25,7 @@ Hard rules:
 - For direction: worsening = clinically bad trend (e.g. rising HbA1c, falling eGFR); improving = clinically good; stable = no meaningful change.
 - Max 6 trends. Skip metrics with insufficient data.
 - When a worsening or clinically meaningful trend warrants specialist attention, set recommendedSpecialty (primary_care, cardiology, nephrology, endocrinology, or pharmacy) and a one-line recommendationReason.
-- Finish by calling submit_trend_report exactly once with your final analysis.`;
+- ALWAYS deliver your final analysis by calling submit_trend_report exactly once. NEVER write the report as plain text — if you write prose instead of calling submit_trend_report, the patient sees nothing.`;
 
 const VALID_SPECIALTIES = new Set([
   "primary_care",
@@ -131,6 +131,39 @@ export async function runTrendAgent(input: {
     input.onStep?.({ tool, args });
   };
 
+  // Force a final submit_trend_report via tool_choice. Returns the structured
+  // report when the model complies, else null. Used when the model ends a turn
+  // with prose instead of calling the tool.
+  const forceSubmit = async (instruction: string): Promise<TrendReport | null> => {
+    if (input.signal?.aborted) return null;
+    try {
+      const forced = await grokResponsesCreate(
+        [{ role: "user" as const, content: instruction }],
+        tools,
+        {
+          previousResponseId,
+          maxTurns: 2,
+          signal: input.signal,
+          toolChoice: { type: "function", name: "submit_trend_report" },
+        }
+      );
+      if (forced.id) previousResponseId = forced.id;
+      const submit = forced.output.find(
+        (item) =>
+          item.type === "function_call" && item.name === "submit_trend_report"
+      );
+      if (submit) {
+        const args = parseToolArgs(submit.arguments);
+        input.onStep?.({ tool: "submit_trend_report", args });
+        const rawTrends = (args.trends as RawTrendInput[] | undefined) ?? [];
+        return buildTrendReport(rawTrends, validIds);
+      }
+    } catch {
+      // fall through
+    }
+    return null;
+  };
+
   for (let step = 0; step < maxSteps; step++) {
     if (input.signal?.aborted) break;
     emitStep("agent_turn", { turn: step + 1 }, `turn-${step + 1}`);
@@ -175,6 +208,12 @@ export async function runTrendAgent(input: {
       (item) => item.type === "function_call"
     );
     if (!functionCalls.length) {
+      // Model concluded with prose instead of calling submit_trend_report.
+      // Force the tool so we still get a structured report.
+      const forced = await forceSubmit(
+        "Provide your final analysis now by calling submit_trend_report, with each trend's evidenceEventIds drawn from the tool results above."
+      );
+      if (forced) return forced;
       break;
     }
 
@@ -211,6 +250,13 @@ export async function runTrendAgent(input: {
 
     nextInput = toolOutputs;
   }
+
+  // Out of investigation steps — force one final structured report before
+  // dropping to a bare fallback.
+  const forced = await forceSubmit(
+    "You are out of investigation steps. Call submit_trend_report now with your best analysis, grounded only in the evidence you have already gathered, with evidenceEventIds from the tool results above."
+  );
+  if (forced) return forced;
 
   return {
     trends: [],

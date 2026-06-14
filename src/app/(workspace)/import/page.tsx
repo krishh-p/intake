@@ -10,11 +10,6 @@ const OPTIONS = [
     description: "Securely pull your EMR/EHR records from a connected health system — no file export needed.",
   },
   {
-    href: "/import/records",
-    title: "Medical records",
-    description: "Upload a JSON export from your electronic medical record system.",
-  },
-  {
     href: "/import/voice",
     title: "Talk to Intake",
     description: "Live voice session with Intake about symptoms, medications, and care barriers.",
